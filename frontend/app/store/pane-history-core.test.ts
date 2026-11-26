@@ -260,4 +260,16 @@ describe("the trail of places", () => {
         expect(r.history.entries).toEqual([A]);
         expect(r.history.index).toBe(0);
     });
+
+    it("entries a removal leaves side by side as one place are one entry, so Back never lands where the person is", () => {
+        const C = ref("tab1", "C");
+        // B, a pane that is gone, B again: the two B are one place once the dead one is removed.
+        const dead = (e: PaneRef) => (e.blockId === "C" ? null : e);
+        // Where the person stands on the second B, Back would land on the first: it goes on to A.
+        const h2 = record(A, B, C, B);
+        const r2 = stepHistory(h2, -1, dead, B);
+        expect(r2.target).toEqual(A);
+        expect(r2.history.entries.map((e) => e.blockId)).toEqual(["A", "B"]);
+        expect(r2.history.index).toBe(1);
+    });
 });

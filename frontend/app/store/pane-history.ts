@@ -40,6 +40,8 @@ const TAB_SETTLE_CAP_MS = 1500;
 const VIEW_WAIT_MS = 500;
 /** Places recorded within this of each other are one: the last stands (rapid clicks, one gesture). */
 const COALESCE_MS = 20;
+/** A link's request that reaches a view this long after the gesture that made it still belongs to that step. */
+const LATE_REQUEST_MS = 3000;
 /** Presses queued while a tab switch is in flight; the rest are dropped. */
 const MAX_PENDING = 3;
 
@@ -55,6 +57,8 @@ let epoch = 0;
 let pending = 0;
 let queue: Promise<void> = Promise.resolve();
 let lastPush: { at: number; index: number } | null = null;
+/** The last gesture's place: where it was recorded, and whether it made an entry of its own. */
+let lastGesture: { blockId: string; at: number; index: number; pushed: boolean } | null = null;
 let idleWaiters: Array<() => void> = [];
 
 export function paneHistorySnapshot(): PaneHistory {
@@ -70,6 +74,7 @@ export function resetPaneHistory(): void {
     pending = 0;
     queue = Promise.resolve();
     lastPush = null;
+    lastGesture = null;
     idleWaiters = [];
 }
 
@@ -89,14 +94,15 @@ function currentPlace(): PaneRef | null {
 }
 
 /** The person went to `place`: push it, or let it stand for a push made a moment ago. */
-function commit(place: PaneRef): void {
+function commit(place: PaneRef): boolean {
     const now = performance.now();
     const again = lastPush != null && history.index === lastPush.index && now - lastPush.at < COALESCE_MS;
     const next = again ? replacePlace(history, place) : recordPane(history, place);
-    if (next === history) return;
+    if (next === history) return false;
     history = next;
     epoch++;
     lastPush = { at: now, index: history.index };
+    return true;
 }
 
 /** Where `ref`'s pane is now: its tab, the tab it was moved to in this window, or nowhere. */
@@ -234,7 +240,10 @@ export async function runGesture<T>(run: () => Promise<T> | T): Promise<T> {
             gestures--;
             if (gestures === 0) {
                 const here = blocked() ? null : currentPlace();
-                if (here) commit(here);
+                if (here) {
+                    const pushed = commit(here);
+                    lastGesture = { blockId: here.blockId, at: performance.now(), index: history.index, pushed };
+                }
                 const waiting = idleWaiters;
                 idleWaiters = [];
                 for (const resolve of waiting) resolve();
@@ -277,6 +286,22 @@ export function recordPlaceMove(blockId: string): void {
     if (blocked() || !placeSourceOf(blockId)) return;
     const tabId = atoms.activeTabId();
     if (tabId) commit(withView({ tabId, blockId }));
+}
+
+/**
+ * A link's request reached the view of pane `blockId` after the gesture that made it had already recorded its
+ * place (the request travels through the pane's meta): the place the view shows now is that gesture's step,
+ * not another one. Nothing else calls it: a request with no gesture of the person just before it (an agent's)
+ * is not a step.
+ */
+export function recordLinkedPlace(blockId: string): void {
+    const g = lastGesture;
+    if (blocked() || !g || g.blockId !== blockId || performance.now() - g.at > LATE_REQUEST_MS) return;
+    const here = currentPlace();
+    if (!here || here.blockId !== blockId || history.index !== g.index) return;
+    lastGesture = null;
+    if (g.pushed) history = setViewAt(history, g.index, here.view);
+    else commit(here);
 }
 
 /**

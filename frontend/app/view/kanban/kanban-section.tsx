@@ -15,7 +15,7 @@ import { Show, type JSX } from "solid-js";
 import { CloseButton } from "@/app/element/ui";
 
 import { AgentStrip, BoardArea, KanbanToolbar, OpenDrawer } from "./kanban-section-parts";
-import { withKanbanPlace } from "./kanban-place";
+import { placedProps, withKanbanPlace } from "./kanban-place";
 import { createKanbanSection, type SectionProps } from "./kanban-section-state";
 import { KanbanBoardsPanel } from "./kanban-boards-panel";
 import { KanbanNewTask } from "./kanban-new-task";
@@ -27,7 +27,8 @@ import "./kanban.scss";
 /** What the Kanban pane passes (kanban-props.ts); all but `visible` are optional, so the board also mounts alone. */
 export const KanbanSection = (props: SectionProps): JSX.Element => {
     // The window's Back and Forward walk this pane's open card and board (kanban-place.ts).
-    const s = withKanbanPlace(createKanbanSection(props), props);
+    const placed = placedProps(props);
+    const s = withKanbanPlace(createKanbanSection(placed), placed);
     return (
         <div ref={s.bindContainer} class="kanban-container">
             <div class="warden-manager-body kanban">

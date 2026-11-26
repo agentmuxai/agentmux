@@ -60,6 +60,7 @@ import {
     paneHistoryBack,
     paneHistoryForward,
     paneHistorySnapshot,
+    recordLinkedPlace,
     recordPlaceMove,
     resetPaneHistory,
     runGesture,
@@ -205,6 +206,42 @@ describe("the trail of places", () => {
         recordPlaceMove("K"); // within a frame of the last: it stands for it
         await settle();
         expect(trail()).toEqual(["A", "K", "K:x", "K:z"]);
+    });
+
+    it("a card a link opens after the gesture recorded its place is part of that step, not another", async () => {
+        const link = runGesture(async () => void w.s.setFocus("K"));
+        await settle();
+        await link;
+        expect(trail()).toEqual(["A", "K"]);
+        kanban.task = "x"; // the request reaches the Kanban a moment after the gesture ended
+        recordLinkedPlace("K");
+        await settle();
+        expect(trail()).toEqual(["A", "K:x"]);
+        // Back from another pane puts the card back.
+        await select("tab1", "B");
+        kanban.task = undefined;
+        paneHistoryBack();
+        await settle();
+        expect([w.s.focus(), kanban.task]).toEqual(["K", "x"]);
+    });
+
+    it("a link followed where the person already is shows its card as one step of its own, and nothing else is moved by a request", async () => {
+        await select("tab1", "K");
+        kanban.task = "y";
+        recordPlaceMove("K");
+        await settle();
+        const link = runGesture(async () => {}); // a link inside the Kanban: nothing to select
+        await settle();
+        await link;
+        kanban.task = "z";
+        recordLinkedPlace("K");
+        await settle();
+        expect(trail()).toEqual(["A", "K", "K:y", "K:z"]);
+        // A request with no gesture of the person just before it (an agent's) is not a step.
+        kanban.task = "q";
+        recordLinkedPlace("K");
+        await settle();
+        expect(trail()).toEqual(["A", "K", "K:y", "K:z"]);
     });
 
     it("a view that has not joined records nothing of its own: a move inside it is not a step", async () => {

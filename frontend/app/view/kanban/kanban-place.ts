@@ -5,14 +5,30 @@
 // Forward put back. What the person clicks records a step; a link's request, a restore and data arriving do not.
 // SPEC_BACK_FORWARD_FOLLOW_THE_WHOLE_TRAIL_2026_11_26.md.
 
-import { onCleanup } from "solid-js";
+import { mergeProps, onCleanup } from "solid-js";
 
-import { recordPlaceMove } from "@/app/store/pane-history";
+import { recordLinkedPlace, recordPlaceMove } from "@/app/store/pane-history";
 import { registerPlaceSource } from "@/app/store/place-sources";
 
 import { taskForOpenRequestAnywhere } from "./kanban-boards";
 import type { KanbanSectionState, SectionProps } from "./kanban-section-state";
 import type { KanbanTask } from "./kanban-types";
+
+/**
+ * `props` with the end of a link's request noted for the trail: the card a link opens is shown after the
+ * link's gesture has recorded its place, and belongs to that step.
+ */
+export function placedProps(props: SectionProps): SectionProps {
+    const blockId = props.placeBlockId;
+    if (!blockId) return props;
+    return mergeProps(props, {
+        onOpenHandled: () => {
+            props.onOpenHandled?.();
+            // The card is shown once the effect that took the request is done.
+            setTimeout(() => recordLinkedPlace(blockId), 0);
+        },
+    });
+}
 
 /**
  * The section's state with its place joined to the window's trail: the pane's place source is registered, and the

@@ -151,13 +151,25 @@ export function stepHistory(
         j += dir;
     }
     if (dead.size === 0 && !moved) return { history: h, target };
-    const entries = h.entries.filter((e) => !dead.has(e)).map((e) => (e === moved?.from ? moved.to : e));
-    // The cursor stays on its own entry; when that one was removed, on the last one left before it.
+    // The cursor stays on its own entry; when that one was removed, on the last one left before it. Entries the
+    // removal left side by side as one place are one entry (the target's own stands for them), so a press never
+    // lands on where the person already is.
+    const entries: PaneRef[] = [];
     let index = -1;
     h.entries.forEach((e, k) => {
-        if (k <= h.index && !dead.has(e)) index++;
+        if (dead.has(e)) return;
+        const kept = e === moved?.from ? moved.to : e;
+        const last = entries[entries.length - 1];
+        if (last && samePlace(last, kept)) entries[entries.length - 1] = kept === target ? kept : last;
+        else entries.push(kept);
+        if (k <= h.index) index = entries.length - 1;
     });
-    return { history: { entries, index }, target };
+    const pruned = { entries, index };
+    if (!elsewhere && target && entries[index] === target) {
+        // The entries on the way were all the same place as the cursor's: go on to the one beyond.
+        return stepHistory(pruned, dir, locate, current);
+    }
+    return { history: pruned, target };
 }
 
 /** The cursor moves to `ref`, an entry of `h`. */
