@@ -425,7 +425,7 @@ pub(crate) mod win {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, EnumChildWindows, GetAncestor, GetForegroundWindow, GetSystemMetrics, GetWindowRect,
-        GetWindowTextW, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, WindowFromPoint,
+        GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, WindowFromPoint,
         GA_ROOT, GA_ROOTOWNER, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_RESTORE,
     };
 
@@ -451,14 +451,6 @@ pub(crate) mod win {
             return None;
         }
         Some(Rect { x: r.left, y: r.top, w: (r.right - r.left) as u32, h: (r.bottom - r.top) as u32 })
-    }
-
-    /// The text of a window's title bar, cut to 60 characters.
-    fn window_title(hwnd: HWND) -> String {
-        let mut buf = [0u16; 256];
-        let n = unsafe { GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
-        let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
-        title.chars().take(60).collect()
     }
 
     /// The executable's file name of the process that owns `hwnd`.
@@ -564,8 +556,9 @@ pub(crate) mod win {
         let holder = if fg.is_null() {
             "no window".to_string()
         } else {
-            let exe = window_exe_name(fg).unwrap_or_else(|| "an app".into());
-            format!("{exe} (\"{}\")", window_title(fg))
+            // The app only, never its title: the title of an app the user hasn't
+            // allowed could be sensitive (`apps` hides a blocked window's too).
+            window_exe_name(fg).unwrap_or_else(|| "another app".into())
         };
         Err(format!(
             "could not bring the window to the front: {holder} has the focus and Windows would not hand it over. Call again in a few seconds; if it keeps failing, ask the person to click this app's window once"
