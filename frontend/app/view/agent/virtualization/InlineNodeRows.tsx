@@ -384,7 +384,7 @@ export function HistoryLinkRow(props: HistoryLinkRowProps): JSX.Element {
                     }
                 }}
             >
-                <span class="agent-history-link-sigil">⌛</span>
+                <i class="fa-solid fa-clock-rotate-left agent-history-link-sigil" aria-hidden="true" />
                 <span class="agent-history-link-label">{historyLinkLabel(props.node() as HistoryLinkNode)}</span>
                 <span class="agent-history-link-cta">{t("inlineNode.openHistory")}</span>
             </div>
