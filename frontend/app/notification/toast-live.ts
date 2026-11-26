@@ -12,6 +12,9 @@
 /** The shortest a toast that expires is shown. */
 export const MIN_TOAST_MS = 6000;
 
+/** How long a toast with a countdown (`NotificationType.countdown`) stays before it closes itself. */
+export const TOAST_COUNTDOWN_MS = 10_000;
+
 /** The live-region role of `n`: what it says, else `alert` for an error and `status` for the rest. */
 export function liveRole(n: Pick<NotificationType, "type" | "live">): "status" | "alert" {
     return n.live ?? (n.type === "error" ? "alert" : "status");

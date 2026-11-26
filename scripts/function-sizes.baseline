@@ -311,7 +311,7 @@
 116 frontend/app/hook/useVoiceInput.ts::createWebSpeechVoiceSession
 109 frontend/app/hook/useWindowDrag.win32.ts::installJsDragListener
 105 frontend/app/init/error-display.ts::showStartupError
-114 frontend/app/notification/notificationitem.tsx::NotificationItem
+108 frontend/app/notification/notificationitem.tsx::NotificationItem
 108 frontend/app/platform/pane-overlay.ts::flushClip
 175 frontend/app/selection/selection-effects.ts::createSelectionRunner
 104 frontend/app/selection/selection-machine.ts::transition
