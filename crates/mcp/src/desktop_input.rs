@@ -499,11 +499,11 @@ pub(crate) mod win {
         true
     }
 
-    /// Try the usual ways to make `hwnd` the foreground window, in turn: ask;
-    /// share the input queue of the window that has the focus (Windows lets a
-    /// thread joined to it take the focus); and a harmless key press (F24),
-    /// which counts as the user's input and lifts the foreground lock.
-    unsafe fn try_foreground(hwnd: HWND, attempt: u32) -> bool {
+    /// Try to make `hwnd` the foreground window: ask; then join the input
+    /// queue of the window that has the focus (Windows lets a thread joined to
+    /// it take the focus) and ask again. It sends no key or click: whatever
+    /// app has the focus is not one the user allowed, so nothing goes to it.
+    unsafe fn try_foreground(hwnd: HWND) -> bool {
         unsafe {
             if GetForegroundWindow() == hwnd {
                 return true;
@@ -521,13 +521,6 @@ pub(crate) mod win {
             if joined {
                 AttachThreadInput(me, fg_thread, 0);
             }
-            if GetForegroundWindow() == hwnd {
-                return true;
-            }
-            if attempt >= 1 {
-                let _ = send(&[key(VK_F24, 0, 0), key(VK_F24, 0, KEYEVENTF_KEYUP)]);
-                SetForegroundWindow(hwnd);
-            }
             GetForegroundWindow() == hwnd
         }
     }
@@ -540,7 +533,7 @@ pub(crate) mod win {
         let hwnd = id as usize as HWND;
         restore_if_minimized(id);
         for attempt in 0..3u32 {
-            if unsafe { try_foreground(hwnd, attempt) } {
+            if unsafe { try_foreground(hwnd) } {
                 // Give the app a moment to take the focus before input goes to it.
                 std::thread::sleep(Duration::from_millis(100));
                 if unsafe { GetForegroundWindow() } == hwnd {
