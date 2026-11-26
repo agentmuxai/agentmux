@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.60.43 — 2026-11-26
+
+- Desktop: a minimised window is restored, the foreground is taken more reliably, each look has a number and scale, look can zoom a region, and actions can return the fresh look
+- A machine that returns under a new key or version at the same address is one peer, so a host-addressed call (a task, Global Memory sync) no longer fails with "fits more than one instance"
+- A hand-off to the person in a Browser pane carries its whole reason, up to 600 characters, and refuses a longer one with the limit instead of cutting it at 300
+- A Browser hand-off tells the agent which files the person attached (names only), and a file chooser the agent left waiting is let go when the pane is handed to the person
+- Each window-tab switch logs a [perf] tab-switch-dirty line: what the page was busy with in the second before the click
+- The three bus send routes (send, inject, broadcast) refuse a request that carries no agent token
+- Each window-tab switch logs a [perf] tab-switch-swap line: the time from the click to the swap being painted, and the longest task in it
+- The tab-switch-swap line marks a switch that a newer one superseded, and waits for the backend to commit a cold tab
+- The status bar no longer fits its width again every second while agents play sounds
+- Agent conversation: the Earlier conversations preserved row uses the history icon, not an hourglass
+- Desktop: ask for several apps in one call, each its own request, with one note naming every answer
+- A pane border drag's release no longer lays the whole page out again: the commit uses the container size the drag held, which took 130 to 320 ms in a window of many panes
+- A border drag no longer waits for a long transcript to lay out while the pointer keeps moving: a heavy body catches up on a pause or the release only, which cost an 80 to 100 ms late frame every 2 seconds
+- An agent's first browser opens in a pane of its own; its later browsers are new tabs of that pane
+- The install scripts are published as agentmux-install.sh and agentmux-install.ps1 only; use agentmux.ai/install.sh
+
 ## 0.60.42 — 2026-11-25
 
 - Vault sync: records are sealed with the layer's own seal, so a removal's re-issue at the new key epoch opens them
