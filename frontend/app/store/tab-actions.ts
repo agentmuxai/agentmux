@@ -340,6 +340,9 @@ function snapshotDirty(clickedAt: number): (tabId: string) => void {
         );
 }
 
+/** How long a cold switch's swap line waits for the backend to commit the tab before it says it did not. */
+const SWAP_WAIT_CAP_MS = 3000;
+
 /**
  * What a person waits for, one line per switch: from the click to the second frame after the incoming tab was first
  * painted (the swap itself for a tab shown already, the reveal's end for a cold one), and the longest long task that
@@ -351,13 +354,15 @@ function logSwapWhenPainted(tabId: string, clickedAt: number, cold: boolean, seq
         requestAnimationFrame(() =>
             requestAnimationFrame(() => {
                 const current = seq === tabSwitchSeq;
-                // A cold tab is on screen once the backend has committed it: a gate lifted earlier (the answer was
-                // slow, the hold timed out) is not its reveal, so wait for the next lift.
-                if (cold && current && activeTabId() !== tabId) return whenGateLifted(painted);
                 const end = performance.now();
+                // A cold tab is on screen once the backend has committed it: a gate lifted earlier (the answer was
+                // slow, the hold timed out) is not its reveal, so wait for the next lift, for a while: a switch the
+                // backend refuses never commits, and says so instead of waiting for ever.
+                const uncommitted = cold && current && activeTabId() !== tabId;
+                if (uncommitted && end - clickedAt < SWAP_WAIT_CAP_MS) return whenGateLifted(painted);
                 const longest = longestTaskStartedBetween(clickedAt, end);
                 console.info(
-                    `[perf] tab-switch-swap to=${tabId} kind=${cold ? "cold" : "warm"} swap=${Math.round(end - clickedAt)}ms longest-task=${longest == null ? "n/a" : `${longest}ms`}${current ? "" : " superseded=true"}`
+                    `[perf] tab-switch-swap to=${tabId} kind=${cold ? "cold" : "warm"} swap=${Math.round(end - clickedAt)}ms longest-task=${longest == null ? "n/a" : `${longest}ms`}${current ? "" : " superseded=true"}${uncommitted ? " uncommitted=true" : ""}`
                 );
             })
         );

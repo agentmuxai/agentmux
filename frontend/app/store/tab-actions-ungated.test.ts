@@ -118,6 +118,25 @@ describe("setActiveTab reveal gate", () => {
         vi.unstubAllGlobals();
     });
 
+    it("says so, once, when the backend never commits a cold tab, and does not wait for ever", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        let t = 0;
+        const now = vi.spyOn(performance, "now").mockImplementation(() => (t += 1500));
+        keepLaidOut = true;
+        await setActiveTab("tab-b"); // the active tab stays tab-a
+        let rounds = 0;
+        while (frames.length > 0 && rounds++ < 40) frames.splice(0).forEach((cb) => cb(0));
+        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("uncommitted=true");
+        expect(frames).toHaveLength(0);
+        now.mockRestore();
+        info.mockRestore();
+        vi.unstubAllGlobals();
+    });
+
     it("logs the swap line as cold for a tab the reveal gates", async () => {
         const frames: FrameRequestCallback[] = [];
         vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
