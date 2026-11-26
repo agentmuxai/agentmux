@@ -573,9 +573,9 @@ jobs:
             echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi
           if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
-          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
+          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh and agentmux-install.ps1 only (the old names install.sh and install.ps1 are no longer release assets; agentmux.ai/install.sh and agentmux.ai/install.ps1 are unchanged, the site copies these files when it ships)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
-          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
           ls -l dist-flat/
 
       # The agent image this release pushed, by the digest of what was pushed: the app pulls
@@ -731,9 +731,9 @@ jobs:
             echo "::error::the macOS DMG is not the one build-macos.yml published (digest reported: '${MACOS_DMG_SHA256:-none}')"; exit 1
           fi
           if [ -d release-artifacts/macos-dmg ]; then find release-artifacts/macos-dmg -type f -name "*.dmg" -exec cp {} dist-flat/ \; ; fi
-          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh/.ps1 and, for two more releases, as install.sh/.ps1 (a pasted releases/latest/download/install.sh link keeps working)
+          # The install scripts are release assets too, so the signed manifest covers them: as agentmux-install.sh and agentmux-install.ps1 only (the old names install.sh and install.ps1 are no longer release assets; agentmux.ai/install.sh and agentmux.ai/install.ps1 are unchanged, the site copies these files when it ships)
           # (docs/specs/SPEC_ONE_COMMAND_INSTALL_ALL_PLATFORMS_2026_11_01.md).
-          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/$f"; cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
+          for f in install.sh install.ps1; do if [ -f "scripts/install/$f" ]; then cp "scripts/install/$f" "dist-flat/agentmux-$f"; fi; done
           echo "--- Release artifacts ---"
           ls -lh dist-flat/
 
