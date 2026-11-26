@@ -68,7 +68,7 @@
         margin-top: 4px;
         background: currentColor;
         transform-origin: left center;
-        animation: toast-countdown-shrink linear forwards;
+        animation: am-shrink-x linear forwards;
 
         &.toast-countdown-bar--held {
             animation-play-state: paused;
@@ -190,13 +190,4 @@
     background: var(--modal-bg-color);
     color: var(--main-text-color);
     box-shadow: 0px 8px 32px 0px rgba(0, 0, 0, 0.25);
-}
-
-@keyframes toast-countdown-shrink {
-    from {
-        transform: scaleX(1);
-    }
-    to {
-        transform: scaleX(0);
-    }
 }

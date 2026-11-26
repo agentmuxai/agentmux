@@ -69,3 +69,9 @@
     from { stroke-dashoffset: 1; }
     to   { stroke-dashoffset: 0; }
 }
+
+// A bar that runs out from its right end to its left over its animation duration (a toast's countdown).
+@keyframes am-shrink-x {
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
+}
