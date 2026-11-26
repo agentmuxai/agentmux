@@ -101,14 +101,55 @@ describe("setActiveTab reveal gate", () => {
         vi.unstubAllGlobals();
     });
 
+    it("marks the swap line of a switch that a newer one superseded", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        keepLaidOut = true;
+        shown.add("tab-b");
+        shown.add("tab-c");
+        await setActiveTab("tab-b");
+        await setActiveTab("tab-c");
+        for (let i = 0; i < 8 && frames.length > 0; i++) frames.splice(0).forEach((cb) => cb(0));
+        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(lines.find((l) => l.includes("to=tab-b"))).toContain("superseded=true");
+        expect(lines.find((l) => l.includes("to=tab-c"))).not.toContain("superseded");
+        info.mockRestore();
+        vi.unstubAllGlobals();
+    });
+
+    it("says so, once, when the backend never commits a cold tab, and does not wait for ever", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        let t = 0;
+        const now = vi.spyOn(performance, "now").mockImplementation(() => (t += 1500));
+        keepLaidOut = true;
+        await setActiveTab("tab-b"); // the active tab stays tab-a
+        let rounds = 0;
+        while (frames.length > 0 && rounds++ < 40) frames.splice(0).forEach((cb) => cb(0));
+        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("uncommitted=true");
+        expect(frames).toHaveLength(0);
+        now.mockRestore();
+        info.mockRestore();
+        vi.unstubAllGlobals();
+    });
+
     it("logs the swap line as cold for a tab the reveal gates", async () => {
         const frames: FrameRequestCallback[] = [];
         vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
         const info = vi.spyOn(console, "info").mockImplementation(() => {});
         keepLaidOut = true;
         await setActiveTab("tab-b");
+        const swapLines = () => info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        // A gate lifted before the backend committed the tab is not its reveal: no line yet.
         for (let i = 0; i < 6 && frames.length > 0; i++) frames.splice(0).forEach((cb) => cb(0));
-        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(swapLines()).toEqual([]);
+        mockActiveTabId = "tab-b";
+        for (let i = 0; i < 6 && frames.length > 0; i++) frames.splice(0).forEach((cb) => cb(0));
+        const lines = swapLines();
         expect(lines).toHaveLength(1);
         expect(lines[0]).toContain("kind=cold");
         info.mockRestore();
