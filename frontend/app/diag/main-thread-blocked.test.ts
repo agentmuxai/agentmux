@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { blockedMsBetween, resetBlockedTracking, startBlockedTracking } from "./main-thread-blocked";
+import { blockedMsBetween, longestTaskStartedBetween, resetBlockedTracking, startBlockedTracking } from "./main-thread-blocked";
 
 type Entry = { startTime: number; duration: number };
 
@@ -58,6 +58,20 @@ describe("main-thread-blocked", () => {
             ],
         });
         expect(blockedMsBetween(90, 1000)).toBe(130);
+    });
+
+    it("names the longest task that started inside the window, whole, and null where nothing is tracked", () => {
+        expect(longestTaskStartedBetween(0, 1000)).toBeNull();
+        startBlockedTracking();
+        delivered?.({
+            getEntries: () => [
+                { startTime: 100, duration: 80 },
+                { startTime: 900, duration: 200 }, // starts inside, runs past the end: counts whole
+                { startTime: 10, duration: 500 }, // starts before the window
+            ],
+        });
+        expect(longestTaskStartedBetween(90, 1000)).toBe(200);
+        expect(longestTaskStartedBetween(2000, 3000)).toBe(0);
     });
 
     it("takes entries not yet delivered to the callback", () => {

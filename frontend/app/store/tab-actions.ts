@@ -8,7 +8,7 @@
 // global.ts), the shared base module both files import, so this module stays
 // out of global.ts's import cycle.
 
-import { blockedMsBetween, startBlockedTracking } from "@/app/diag/main-thread-blocked";
+import { blockedMsBetween, longestTaskStartedBetween, startBlockedTracking } from "@/app/diag/main-thread-blocked";
 import { paneTotals } from "@/app/diag/pane-stats";
 import { heapMb, windowLabel } from "@/app/diag/renderer-sample";
 import { paneCount } from "@/app/platform/pane-rect-registry";
@@ -17,7 +17,7 @@ import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
 import { focusManager } from "./focusManager";
 import { WorkspaceService } from "./services";
-import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown } from "./tab-reveal";
+import { holdRevealGate, logUngatedReveal, markTabShown, scheduleRevealLift, tabWasShown, whenGateLifted } from "./tab-reveal";
 import { dirtyAtClick } from "./switch-activity";
 import { pendingMuxUpdateCount } from "./mos-update-queue";
 import { activeTabId, workspace } from "./window-identity";
@@ -340,6 +340,27 @@ function snapshotDirty(clickedAt: number): (tabId: string) => void {
         );
 }
 
+/**
+ * What a person waits for, one line per switch: from the click to the second frame after the incoming tab was first
+ * painted (the swap itself for a tab shown already, the reveal's end for a cold one), and the longest long task that
+ * started in that time. The `[tab-switch]` line's `frames` runs to two frames after the backend's answer, which a tab
+ * already shown does not wait for. A separate line, because a cold tab's swap comes after that one is written.
+ */
+function logSwapWhenPainted(tabId: string, clickedAt: number, cold: boolean): void {
+    const painted = () =>
+        requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+                const end = performance.now();
+                const longest = longestTaskStartedBetween(clickedAt, end);
+                console.info(
+                    `[perf] tab-switch-swap to=${tabId} kind=${cold ? "cold" : "warm"} swap=${Math.round(end - clickedAt)}ms longest-task=${longest == null ? "n/a" : `${longest}ms`}`
+                );
+            })
+        );
+    if (cold) whenGateLifted(painted);
+    else painted();
+}
+
 /** One line per switch, always (#47767): the click to the RPC's return and to two frames later, how many browser
  *  panes a layout change must clip, and how many steps threw. A superseded switch says so. */
 function logSwitch(
@@ -408,6 +429,7 @@ export async function setActiveTab(tabId: string): Promise<void> {
     const gated = !(keepInactiveTabsLaidOut() && tabWasShown(tabId));
     if (gated) guardStep("the reveal gate", guard, () => holdRevealGate(tabId));
     const logDirty = snapshotDirty(clickedAt);
+    logSwapWhenPainted(tabId, clickedAt, gated);
     const cancelIntent = showSwitchIntent(tabId, (write) => guardStep("the switch intent", guard, write));
     let rpcMs = -1;
     try {
