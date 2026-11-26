@@ -4,7 +4,7 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BEHIND_FRAME_MS, DEFAULT_DRAG_REFRESH_MS, HEAVY_ROUNDS, STARVED_ROUNDS, DRAG_PAUSE_MS, dragRefreshMs, dragRefreshTick, splitterDragActive, usePaneBodyHold } from "./pane-body-hold";
+import { BEHIND_FRAME_MS, DEFAULT_DRAG_REFRESH_MS, STARVED_ROUNDS, DRAG_PAUSE_MS, dragRefreshMs, dragRefreshTick, splitterDragActive, usePaneBodyHold } from "./pane-body-hold";
 
 const KEY = "agentmux:pane-drag-refresh-ms";
 
@@ -145,7 +145,7 @@ describe("usePaneBodyHold during a drag", () => {
         });
 
 
-        it("keeps a transcript (a heavy body) for a pause, or a longer wait, while the pointer keeps moving; a terminal catches up at the pace", () => {
+        it("keeps a transcript (a heavy body) for a pause while the pointer keeps moving, however long; a terminal catches up at the pace", () => {
             const agent = frame({ w: 400, h: 300 });
             const term = frame({ w: 200, h: 300 });
             const [dragging, setDragging] = createSignal(true);
@@ -159,11 +159,11 @@ describe("usePaneBodyHold during a drag", () => {
             }
             expect(t.hold()).toEqual({ width: 250, height: 300 });
             expect(a.hold()).toEqual({ width: 400, height: 300 });
-            for (let ms = 0; ms < DEFAULT_DRAG_REFRESH_MS * HEAVY_ROUNDS; ms += 16) {
+            for (let ms = 0; ms < DEFAULT_DRAG_REFRESH_MS * 8; ms += 16) {
                 move();
                 frames(1);
             }
-            expect(a.hold()).toEqual({ width: 450, height: 300 });
+            expect(a.hold()).toEqual({ width: 400, height: 300 });
             setDragging(false);
             a.dispose();
             t.dispose();
