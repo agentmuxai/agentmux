@@ -3,7 +3,7 @@
 
 // Where a pane an agent opens goes when it names no place: a tab of its own pane group (`agent_tab_default`).
 
-use super::agent_tab_default::{apply, target_for};
+use super::agent_tab_default::{apply, browser_target, target_for, BROWSER_FIRST_SPLIT};
 use super::*;
 use crate::backend::rpc_types::CommandPaneOpenData;
 use crate::server::tests::test_state;
@@ -90,7 +90,7 @@ async fn open_twice_from_one_agent_is_two_tabs_of_one_pane_not_two_splits() {
     let agent = an_agent();
 
     let first = agent_opens(&state, &agent, &own, "files").await;
-    let second = agent_opens(&state, &agent, &own, "browser").await;
+    let second = agent_opens(&state, &agent, &own, "editor").await;
 
     assert_eq!((first.tab_id.as_str(), second.tab_id.as_str()), (tab.as_str(), tab.as_str()));
     assert_eq!(group_of(&state, &tab).await, vec![own.clone(), first.block_id.clone(), second.block_id.clone()], "one pane group, three tabs");
@@ -202,6 +202,129 @@ async fn a_container_agent_with_no_history_stacks_onto_its_own_pane() {
     assert_eq!(cmd.stack_onto_block_id.as_deref(), Some(own.as_str()));
     let res = open_pane(&state, cmd).await.expect("an open");
     assert_eq!(group_of(&state, &tab).await, vec![own, res.block_id]);
+}
+
+/// What `apply` made of an agent's browser open that named no place.
+fn browser_cmd(own: &str) -> CommandPaneOpenData {
+    CommandPaneOpenData { view: "browser".into(), split_reference_block_id: Some(own.into()), ..Default::default() }
+}
+
+/// What the open will do: split below the agent, or stack onto a browser pane.
+#[derive(Debug, PartialEq)]
+enum Browser {
+    Split(String),
+    Stack(String),
+}
+
+fn browser_plan(state: &AppState, agent: &str, own: &str) -> Browser {
+    let mut cmd = browser_cmd(own);
+    apply(state, true, Some(agent), &mut cmd);
+    match (cmd.stack_onto_block_id, cmd.split_direction) {
+        (Some(t), None) => Browser::Stack(t),
+        (None, Some(d)) => Browser::Split(d),
+        other => panic!("a browser open is a split or a tab, not {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_agents_first_browser_gets_a_pane_of_its_own_and_the_next_stack_onto_it() {
+    let state = test_state();
+    let (tab, own) = tab_with_a_pane(&state).await;
+    let agent = an_agent();
+    assert_eq!(browser_plan(&state, &agent, &own), Browser::Split(BROWSER_FIRST_SPLIT.into()), "the first browser splits, as before");
+
+    let first = agent_opens(&state, &agent, &own, "browser").await;
+    assert_eq!(group_of_pane(&state, &tab, &own).await, vec![own.clone()], "the agent's own pane did not take it");
+    assert_eq!(group_of_pane(&state, &tab, &first.block_id).await, vec![first.block_id.clone()], "a pane of its own");
+
+    assert_eq!(browser_plan(&state, &agent, &own), Browser::Stack(first.block_id.clone()));
+    let second = agent_opens(&state, &agent, &own, "browser").await;
+    assert_eq!(group_of_pane(&state, &tab, &second.block_id).await, vec![first.block_id.clone(), second.block_id.clone()], "a tab of the first");
+    assert_eq!(group_of_pane(&state, &tab, &own).await, vec![own.clone()]);
+    // The third joins the same pane, whichever of its tabs is the newest.
+    assert_eq!(browser_plan(&state, &agent, &own), Browser::Stack(second.block_id.clone()));
+    let third = agent_opens(&state, &agent, &own, "browser").await;
+    assert_eq!(group_of_pane(&state, &tab, &first.block_id).await, vec![first.block_id, second.block_id, third.block_id]);
+}
+
+#[tokio::test]
+async fn the_new_browser_tab_is_the_one_shown_in_the_browser_pane() {
+    let state = test_state();
+    let (_tab, own) = tab_with_a_pane(&state).await;
+    let agent = an_agent();
+    let first = agent_opens(&state, &agent, &own, "browser").await;
+    let mut cmd = browser_cmd(&own);
+    cmd.focus = Some(false);
+    apply(&state, true, Some(&agent), &mut cmd);
+    assert_eq!(cmd.focus, Some(true), "the new tab shows in the browser pane");
+    cmd.meta = Some(MetaMapType::from([("view".to_string(), json!("browser"))]));
+    let second = open_pane(&state, cmd).await.expect("an open");
+    assert_eq!(shown_in_pane_of(&state, &first.block_id).await, second.block_id, "the new tab is the shown one");
+    assert_eq!(shown_in_pane_of(&state, &own).await, own, "the agent's own pane keeps what it shows");
+}
+
+/// The block a pane shows (its active tab), for the pane that holds `pane`.
+async fn shown_in_pane_of(state: &AppState, pane: &str) -> String {
+    fn leaf<'a>(n: &'a agentmux_common::layout_types::LayoutNode, b: &str) -> Option<&'a agentmux_common::layout_types::LayoutNodeData> {
+        n.data.as_ref().filter(|d| d.block_id == b || d.block_stack.iter().any(|x| x == b)).or_else(|| n.children.iter().find_map(|c| leaf(c, b)))
+    }
+    let s = state.srv_state.lock().await;
+    s.tabs.values().find_map(|t| t.rootnode.as_ref().and_then(|r| leaf(r, pane))).expect("the pane is in a tree").block_id.clone()
+}
+
+#[tokio::test]
+async fn only_the_agents_own_open_browser_in_its_own_tab_is_a_target() {
+    let state = test_state();
+    let (_tab, own) = tab_with_a_pane(&state).await;
+    let (_other_tab, elsewhere) = tab_with_a_pane(&state).await;
+    let (agent, other_agent) = (an_agent(), an_agent());
+
+    // An editor opened in between is not a target.
+    let first = agent_opens(&state, &agent, &own, "browser").await;
+    let _editor = agent_opens(&state, &agent, &own, "editor").await;
+    assert_eq!(browser_plan(&state, &agent, &own), Browser::Stack(first.block_id.clone()));
+
+    // Another agent's browser is not a target: an agent with no browser of its own yet splits.
+    let _theirs = agent_opens(&state, &other_agent, &own, "browser").await;
+    assert_eq!(browser_plan(&state, &an_agent(), &own), Browser::Split(BROWSER_FIRST_SPLIT.into()));
+
+    // A browser that was closed, or moved to another window tab, makes the next one a first again.
+    assert_eq!(browser_target(&state.mstore, &["a-browser-that-was-closed".to_string()], &own), None);
+    assert_eq!(browser_target(&state.mstore, &[elsewhere], &own), None);
+    assert_eq!(browser_target(&state.mstore, &[], &own), None);
+}
+
+#[tokio::test]
+async fn a_browser_that_asks_for_a_place_gets_it_and_a_persons_browser_keeps_its_split() {
+    let state = test_state();
+    let (_tab, own) = tab_with_a_pane(&state).await;
+    let agent = an_agent();
+    let _first = agent_opens(&state, &agent, &own, "browser").await;
+    for ask in [json!({ "split_direction": "right" }), json!({ "floating": true }), json!({ "stack_onto_block_id": "elsewhere" })] {
+        let mut cmd = browser_cmd(&own);
+        for (k, v) in ask.as_object().unwrap() {
+            let mut j = serde_json::to_value(&cmd).unwrap();
+            j[k] = v.clone();
+            cmd = serde_json::from_value(j).unwrap();
+        }
+        let asked = serde_json::to_value(&cmd).unwrap();
+        apply(&state, true, Some(&agent), &mut cmd);
+        assert_eq!(serde_json::to_value(&cmd).unwrap(), asked, "{ask}");
+    }
+    let mut person = browser_cmd(&own);
+    apply(&state, false, None, &mut person);
+    assert_eq!((person.stack_onto_block_id, person.split_direction), (None, None), "a person's own open is not touched");
+}
+
+#[tokio::test]
+async fn a_container_agent_follows_the_same_browser_rule() {
+    let state = test_state();
+    let (tab, own) = tab_with_a_pane(&state).await;
+    // The container's route knows its agent by the signed id, as a host agent's route does.
+    let container = an_agent();
+    let first = agent_opens(&state, &container, &own, "browser").await;
+    assert_eq!(group_of_pane(&state, &tab, &first.block_id).await, vec![first.block_id.clone()], "its first browser has a pane of its own");
+    assert_eq!(browser_plan(&state, &container, &own), Browser::Stack(first.block_id));
 }
 
 #[tokio::test]

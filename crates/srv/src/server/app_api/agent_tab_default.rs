@@ -3,12 +3,15 @@
 
 //! Where a pane an agent opens goes when the agent does not say: a tab of its own pane group.
 //!
-//! An agent that opens a pane (an Editor, Files, Browser or widget pane) and names no placement gets a new tab in the
-//! pane group of the pane it opened last, or in its own pane's group when it has none open there. It gets a split only
-//! when it asks for one (`split`), a floating window only when it asks for one (`floating`), and a tab of the person's
-//! other panes or of another window tab never: the group is looked for in the agent's own tab only.
+//! An agent that opens a pane (an Editor, Files or widget pane) and names no placement gets a new tab in the pane group
+//! of the pane it opened last, or in its own pane's group when it has none open there. A Browser is different: the first
+//! one an agent drives gets a pane of its own (a split below the agent's pane), and each later one is a new tab of the
+//! newest browser pane the agent opened that is still open in its own window tab. An agent gets a split only when it
+//! asks for one (`split`), a floating window only when it asks for one (`floating`), and a tab of the person's other
+//! panes, of another agent's browser or of another window tab never: the group is looked for in the agent's own tab
+//! only, among panes the agent opened.
 
-use crate::backend::obj::{LayoutState, Tab};
+use crate::backend::obj::{Block, LayoutState, Tab};
 use crate::backend::storage::store::Store;
 use crate::backend::rpc_types::CommandPaneOpenData;
 use crate::server::AppState;
@@ -30,6 +33,24 @@ fn laid_out(mstore: &Store, tab_id: &str) -> Vec<String> {
     layout.and_then(|l| l.rootnode).map(|root| super::member_block_ids(&root)).unwrap_or_default()
 }
 
+/// Where an agent's first browser goes: below the agent's own pane, which gives up half of its space (`down:half`, see
+/// `resolve_placement`).
+pub(crate) const BROWSER_FIRST_SPLIT: &str = "down:half";
+
+/// Whether `block_id` is a browser pane.
+fn is_browser(mstore: &Store, block_id: &str) -> bool {
+    mstore.get::<Block>(block_id).ok().flatten().is_some_and(|b| crate::backend::obj::meta_get_string(&b.meta, "view", "") == "browser")
+}
+
+/// The browser pane `agent`'s next browser stacks onto: the newest browser pane it opened that is still in a pane of
+/// the tab of its own pane `own`. `None` for the agent's first browser, and after its browsers were closed or moved
+/// to another tab: the next one is a first again. `opened` is the agent's docked panes, newest first.
+pub(crate) fn browser_target(mstore: &Store, opened: &[String], own: &str) -> Option<String> {
+    let own_tab = super::resolve_tab_id_for_block(mstore, own).ok()?;
+    let held = laid_out(mstore, &own_tab);
+    opened.iter().find(|pane| held.contains(pane) && is_browser(mstore, pane)).cloned()
+}
+
 /// The pane `agent` stacks its next pane onto: the newest pane it opened that is still there, docked, in a pane of the
 /// tab of its own pane `own`; else `own`. `opened` is the agent's docked panes, newest first.
 pub(crate) fn target_for(mstore: &Store, opened: &[String], own: &str) -> Option<String> {
@@ -49,6 +70,15 @@ pub(crate) fn apply(state: &AppState, by_agent: bool, agent: Option<&str>, cmd: 
     }
     let Some(own) = cmd.split_reference_block_id.clone().filter(|b| !b.is_empty()) else { return };
     let opened = agent.map(crate::server::pane_openers::docked_of).unwrap_or_default();
+    if cmd.view == "browser" {
+        match browser_target(&state.mstore, &opened, &own) {
+            // Shown in its pane, so the person sees what the agent drives: switching the tab of a pane of the agent's
+            // own browsers takes nobody's focus or caret.
+            Some(browser) => (cmd.stack_onto_block_id, cmd.focus) = (Some(browser), Some(true)),
+            None => cmd.split_direction = Some(BROWSER_FIRST_SPLIT.to_string()),
+        }
+        return;
+    }
     if let Some(target) = target_for(&state.mstore, &opened, &own) {
         cmd.stack_onto_block_id = Some(target);
     }

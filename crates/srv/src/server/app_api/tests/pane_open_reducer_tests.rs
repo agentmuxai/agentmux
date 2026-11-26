@@ -1978,6 +1978,70 @@ async fn a_popup_the_person_clicks_in_a_limited_pane_is_theirs_and_unlimited() {
     assert!(crate::server::browser_allowlist::list_for(&agents_popup).is_some(), "it shares the opener's limit");
 }
 
+/// An agent's browsers through the route: the first has a pane of its own below the agent, the next ones are tabs of
+/// that pane and the newest is the one shown; a browser that asks for a split still splits.
+#[tokio::test]
+async fn an_agents_first_browser_has_its_own_pane_and_the_next_are_tabs_of_it() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let leaf_of = |id: &str| {
+        let s = state.srv_state.try_lock().expect("srv state free");
+        let root = s.tabs[&tab_id].rootnode.clone().expect("layout tree");
+        let leaf = crate::backend::layout::find_leaf_containing_block(&root, id).expect("a pane holds the block").clone();
+        let data = leaf.data.clone().unwrap();
+        (leaf.id.clone(), data.block_id, data.block_stack)
+    };
+    let mut open = |url: &str, extra: serde_json::Value| {
+        let mut body = serde_json::json!({ "url": url });
+        for (k, v) in extra.as_object().unwrap() {
+            body[k] = v.clone();
+        }
+        merged(&auth, body)
+    };
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open("https://one.example.com/", serde_json::json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let first = body["data"]["pane"].as_str().unwrap().to_string();
+    let (own_leaf, _, _) = leaf_of(&own);
+    let (first_leaf, shown, _) = leaf_of(&first);
+    assert_ne!(first_leaf, own_leaf, "the first browser has a pane of its own");
+    assert_eq!(shown, first);
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open("https://two.example.com/", serde_json::json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let second = body["data"]["pane"].as_str().unwrap().to_string();
+    let (second_leaf, shown, stack) = leaf_of(&second);
+    assert_eq!(second_leaf, first_leaf, "the next browser is a tab of the first browser's pane");
+    assert_eq!(stack, vec![first.clone(), second.clone()]);
+    assert_eq!(shown, second, "the person sees the browser the agent drives");
+    assert_eq!(leaf_of(&own).2.len(), 0, "the agent's own pane gained no tab");
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", open("https://three.example.com/", serde_json::json!({ "split": "right" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let third = body["data"]["pane"].as_str().unwrap().to_string();
+    assert_ne!(leaf_of(&third).0, first_leaf, "a split asked for is a split");
+}
+
 /// A link that opens a new tab joins the opener's pane as a pane tab; a new
 /// window (shift-click) opens beside it. The person's click shows the new tab;
 /// an agent's popup doesn't take the person's view.
