@@ -294,14 +294,14 @@ function watchUserMoves(): void {
  * that window. Spec §4.3.
  */
 export function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<SelectionResult> {
-    // A reveal an agent, a widget or another window asked for moves the person's selection for them: not a step of
-    // the window's trail of places (Back then returns to where the trail left the person).
+    // A reveal an agent or another window asked for moves the person's selection for them: not a step of the
+    // window's trail of places (Back then returns to where the trail left the person).
     if (opts.source && NOT_THE_PERSON.has(opts.source)) return withoutTrail(() => revealBlockNow(blockId, opts));
     return revealBlockNow(blockId, opts);
 }
 
-/** The `source` of a reveal that is not the person's own click (a notice, the palette and the like are). */
-const NOT_THE_PERSON: ReadonlySet<string> = new Set(["api", "remote-window", "agent-opened", "open", "widget"]);
+/** The `source` of a reveal the person did not make. A click (the widget bar, a notice's Show button, the palette) is theirs. */
+const NOT_THE_PERSON: ReadonlySet<string> = new Set(["api", "remote-window", "open"]);
 
 async function revealBlockNow(blockId: string, opts: RevealOptions): Promise<SelectionResult> {
     watchUserMoves();
