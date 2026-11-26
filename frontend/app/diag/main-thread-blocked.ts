@@ -52,6 +52,15 @@ export function blockedMsBetween(start: number, end: number): number | null {
     return Math.round(total);
 }
 
+/** The longest long task (ms) that started inside [start, end] (performance.now() times), or null when none is tracked. */
+export function longestTaskStartedBetween(start: number, end: number): number | null {
+    if (observer == null) return null;
+    addEntries(observer.takeRecords());
+    let longest = 0;
+    for (const t of ring) if (t.start >= start && t.start <= end) longest = Math.max(longest, t.end - t.start);
+    return Math.round(longest);
+}
+
 /** Test seam: forget everything and let the next start begin afresh. */
 export function resetBlockedTracking(): void {
     observer?.disconnect();

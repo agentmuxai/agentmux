@@ -46,6 +46,7 @@ vi.mock("./tab-reveal", () => ({
     scheduleRevealLift: () => scheduleRevealLift(),
     logUngatedReveal: (id: string) => logUngatedReveal(id),
     tabWasShown: (id: string) => shown.has(id),
+    whenGateLifted: (fn: () => void) => fn(),
 }));
 
 import { setActiveTab } from "./tab-actions";
@@ -82,5 +83,35 @@ describe("setActiveTab reveal gate", () => {
         expect(holdRevealGate).not.toHaveBeenCalled();
         expect(scheduleRevealLift).not.toHaveBeenCalled();
         expect(logUngatedReveal).toHaveBeenCalledWith("tab-b");
+    });
+
+    it("logs the swap line for a tab already shown, once the swap is painted", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        keepLaidOut = true;
+        shown.add("tab-b");
+        await setActiveTab("tab-b");
+        const swapLines = () => info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(swapLines()).toEqual([]);
+        for (let i = 0; i < 6 && frames.length > 0; i++) frames.splice(0).forEach((cb) => cb(0));
+        expect(swapLines()).toHaveLength(1);
+        expect(swapLines()[0]).toMatch(/^\[perf\] tab-switch-swap to=tab-b kind=warm swap=\d+ms longest-task=(n\/a|\d+ms)$/);
+        info.mockRestore();
+        vi.unstubAllGlobals();
+    });
+
+    it("logs the swap line as cold for a tab the reveal gates", async () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => frames.push(cb));
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        keepLaidOut = true;
+        await setActiveTab("tab-b");
+        for (let i = 0; i < 6 && frames.length > 0; i++) frames.splice(0).forEach((cb) => cb(0));
+        const lines = info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] tab-switch-swap"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain("kind=cold");
+        info.mockRestore();
+        vi.unstubAllGlobals();
     });
 });

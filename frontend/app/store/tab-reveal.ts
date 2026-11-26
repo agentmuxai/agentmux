@@ -241,6 +241,17 @@ function liftTabGate(source: "settle" | "orphaned-hold", hitCap: boolean, elapse
     setTabSwitching(false);
     setGateTargetTabId(null);
     fadeOutStartupSplash();
+    const done = [...liftWaiters];
+    liftWaiters.clear();
+    for (const fn of done) fn();
+}
+
+const liftWaiters = new Set<() => void>();
+
+/** Runs `fn` once the whole-tab gate is lifted (now, when none is up). */
+export function whenGateLifted(fn: () => void): void {
+    if (!tabSwitching()) fn();
+    else liftWaiters.add(fn);
 }
 
 /**
