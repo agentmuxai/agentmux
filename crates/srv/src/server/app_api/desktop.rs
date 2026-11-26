@@ -176,7 +176,7 @@ pub(crate) fn settled(request: &crate::backend::sensitive_requests::Request, out
         tell(&block_id, &said);
     }
     // A request that another agent joined sends its own note to every asker, which is not held.
-    member && group::holds(request)
+    group::keeps_own_note_out(member, request.askers().len())
 }
 
 /// Whether the notes about this request's progress (approved, counting down) are left out, because

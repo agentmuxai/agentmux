@@ -177,10 +177,18 @@ pub(crate) fn request_is_open(request_id: &str) -> bool {
     requests::registry().get(request_id).is_some_and(|r| r.status.is_open())
 }
 
-/// A request's notes are held for its group only when its group's agent is the only one that asked
-/// for it. One that another agent joined sends its own notes to every asker.
+/// Whether a request's own note is left out because its group says it: the request was a member when
+/// it ended (even if it was the one that finished the group, which is then gone), and its group's
+/// agent is the only one that asked for it. One that another agent joined sends its own note to every
+/// asker.
+pub(crate) fn keeps_own_note_out(was_member: bool, askers: usize) -> bool {
+    was_member && askers == 1
+}
+
+/// A request's progress notes (approved, counting down) are held while it is in a group and nobody
+/// else asked for it.
 pub(crate) fn holds(request: &Request) -> bool {
-    request.askers().len() == 1 && is_member(&request.id)
+    keeps_own_note_out(is_member(&request.id), request.askers().len())
 }
 
 #[cfg(test)]
@@ -326,5 +334,22 @@ mod tests {
         flush(&k, &|_| true);
         // After the deadline took the group, the same request is no longer a member.
         assert_eq!(settle_member("mem-a", Settled::Allowed, &|_| true), (false, None));
+    }
+
+    #[test]
+    fn the_request_that_finishes_a_group_does_not_send_its_own_note_as_well() {
+        let k = fresh("last");
+        assert!(add(&k, "block-1", "last-a", "one").grouped());
+        assert!(add(&k, "block-1", "last-b", "two").grouped());
+        seal(&k, &|_| true);
+        settle_member("last-a", Settled::Allowed, &|_| true);
+        // `last-b` is the one that ends the group: the group is gone when `settled` decides.
+        let (member, done) = settle_member("last-b", Settled::Vetoed, &|_| true);
+        assert!(done.is_some() && !is_member("last-b"));
+        assert!(keeps_own_note_out(member, 1), "its own vetoed note is not sent after the combined one");
+        // A request that another agent also asked for keeps its notes for every asker.
+        assert!(!keeps_own_note_out(member, 2));
+        // A request that was never in a group sends its own.
+        assert!(!keeps_own_note_out(false, 1));
     }
 }
