@@ -33,6 +33,7 @@ import { setActiveBlockInStack } from "@/layout/index";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutNode } from "@/layout/lib/types";
+import { withoutTrail } from "@/app/store/trail-hooks";
 import { emitPaneLocate } from "./pane-locate";
 import { paneIdentity } from "./pane-identity";
 import { selectTrace } from "./select-trace";
@@ -292,7 +293,17 @@ function watchUserMoves(): void {
  * THAT window's renderer to reveal it (`block:reveal`, reveal-block-events.ts) and this one raises
  * that window. Spec §4.3.
  */
-export async function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<SelectionResult> {
+export function revealBlock(blockId: string, opts: RevealOptions = {}): Promise<SelectionResult> {
+    // A reveal an agent or another window asked for moves the person's selection for them: not a step of the
+    // window's trail of places (Back then returns to where the trail left the person).
+    if (opts.source && NOT_THE_PERSON.has(opts.source)) return withoutTrail(() => revealBlockNow(blockId, opts));
+    return revealBlockNow(blockId, opts);
+}
+
+/** The `source` of a reveal the person did not make. A click (the widget bar, a notice's Show button, the palette) is theirs. */
+const NOT_THE_PERSON: ReadonlySet<string> = new Set(["api", "remote-window", "open"]);
+
+async function revealBlockNow(blockId: string, opts: RevealOptions): Promise<SelectionResult> {
     watchUserMoves();
     const done = selectTrace.revealStarted(opts.source ?? "unknown", blockId);
     const result = await selection.select({

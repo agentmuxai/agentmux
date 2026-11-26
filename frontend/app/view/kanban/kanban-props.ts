@@ -25,6 +25,8 @@ export interface KanbanSectionProps {
     /** Pane meta `kanban:board`: the board shown, by slug (none: the default board). */
     board: string | null;
     onBoard(slug: string): void;
+    /** The pane this board is in: its open card and board are a place the window's Back and Forward walk (place-sources.ts). */
+    placeBlockId?: string;
     /** Where a card's agent opens; without it the agent's own pane is revealed (`revealBlock`). */
     onOpenAgent?(blockId: string): void;
 }

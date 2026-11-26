@@ -104,6 +104,7 @@ vi.mock("@/app/store/services", () => ({
 
 import { isWorkspaceClosedFailure } from "@/app/selection/reveal-failure";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
+import { installTrailRunners } from "@/app/store/trail-hooks";
 import { findOpenBlockByView, revealBlock, showBlockInPane, showBlockWithoutFocus, tellRevealFailure } from "./reveal-block";
 
 /** A layout model whose one pane holds `members` as tabs. */
@@ -363,6 +364,26 @@ describe("revealBlock — a block in another window (spec §4.3)", () => {
         expect(notices.map((n) => n.message)).toEqual(["the other window could not show it"]);
         blockReveal = async () => ({ found: true, window_id: "win-other" });
         expect(await revealBlock("remote")).toMatchObject({ ok: false, reason: "remote-timeout" });
+    });
+
+    it("a reveal an agent or the host asked for is not a step of the trail; a click (widget bar, a notice's Show) is", async () => {
+        const quiet: string[] = [];
+        const restore = installTrailRunners(
+            (run) => Promise.resolve(run()),
+            (run) => {
+                quiet.push("muted");
+                return Promise.resolve(run());
+            }
+        );
+        try {
+            for (const source of ["api", "remote-window", "open"]) await revealBlock("agentB", { source });
+            expect(quiet).toEqual(["muted", "muted", "muted"]);
+            quiet.length = 0;
+            for (const source of ["widget", "agent-opened", "palette", undefined]) await revealBlock("agentB", { source });
+            expect(quiet).toEqual([]);
+        } finally {
+            restore();
+        }
     });
 
     it("a block in this window never reaches srv", async () => {

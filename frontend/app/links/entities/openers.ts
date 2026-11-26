@@ -7,6 +7,7 @@
  * `open` calls one of these and never opens a pane itself; the registry test reads the kinds' source to prove it.
  */
 
+import { asGesture } from "@/app/store/trail-hooks";
 import { siteOf } from "./bare-domain";
 import type { Destination, OpenOptions, OpenResult } from "./types";
 
@@ -14,7 +15,8 @@ const OK: OpenResult = { ok: true };
 
 async function attempt(run: () => Promise<void>): Promise<OpenResult> {
     try {
-        await run();
+        // A person's click on a link: one step of the window's trail of places.
+        await asGesture(run);
         return OK;
     } catch (err) {
         return { ok: false, reason: err instanceof Error ? err.message : String(err) };

@@ -44,6 +44,7 @@ export function create(ctx: PaneTabHostContext): PaneTabInstance {
                 <KanbanSection
                     visible={ctx.visibility() === "active"}
                     openRequest={open()}
+                    placeBlockId={ctx.blockId}
                     onOpenHandled={() => void ctx.setMeta({ "kanban:open": null, "reviews:task": null })}
                     waits={waits()}
                     onWaits={(w) => void ctx.setMeta({ "kanban:waits": w })}

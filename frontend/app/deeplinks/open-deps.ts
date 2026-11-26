@@ -11,6 +11,7 @@ import { openOrFocusPaneIdByView } from "@/app/store/block-component-registry";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { atoms, MOS, workspace } from "@/app/store/global";
 import { openLink } from "@/app/store/misc-utils";
+import { runGesture } from "@/app/store/pane-history";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { t } from "@/app/i18n/i18n";
@@ -75,6 +76,7 @@ export function windowDeps(): ExecutorDeps {
         now: () => performance.now(),
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         translate: (key) => t(key),
+        gesture: runGesture,
         async openForPerson(plan, how) {
             const def: BlockDef = { meta: plan.meta as MetaType };
             if (how.floating || how.newPane) {
