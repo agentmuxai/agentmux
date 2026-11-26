@@ -1020,6 +1020,8 @@ describe("resize through collapsed panes", () => {
         expect(Math.max(...rects.map((r) => r!.top + r!.height))).toBeLessThanOrEqual(500);
 
         model.onResizeEnd();
+        expect(measured.count).toBe(0); // the release's commit uses the drag's measure: no layout of the page right after it
+        model.updateTree();
         expect(measured.count).toBeGreaterThan(0); // after the drag the container is read as before
     });
 
