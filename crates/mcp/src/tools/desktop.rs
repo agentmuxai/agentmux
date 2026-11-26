@@ -149,8 +149,9 @@ async fn authorize(cx: &ToolCtx<'_>, action: &str, w: &AgentMuxWindowInfo, id: u
 enum Asked {
     /// A grant is live already.
     Granted,
-    /// The user is being asked; the answer comes in one note for the whole call.
-    Pending,
+    /// The user is being asked. `grouped`: the answer comes in the one note for the whole call;
+    /// otherwise this app's own note comes by itself.
+    Pending { grouped: bool },
     /// Not now, and why (refused, blocked, denied, stopped, off).
     No(String),
 }
@@ -160,7 +161,7 @@ fn read_answer(answer: &Value) -> Asked {
     let message = answer["message"].as_str().unwrap_or("Desktop refused this").to_string();
     match answer["status"].as_str() {
         Some("allow") => Asked::Granted,
-        Some("pending") => Asked::Pending,
+        Some("pending") => Asked::Pending { grouped: answer["grouped"].as_bool() == Some(true) },
         _ => Asked::No(message),
     }
 }
@@ -201,7 +202,8 @@ async fn request_many(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
     input::win::ensure_dpi_aware();
     let call = uuid::Uuid::new_v4().to_string();
     let mut lines = Vec::new();
-    let mut pending = 0usize;
+    let mut grouped = 0usize;
+    let mut alone = 0usize;
     let mut first: Option<DesktopWindowRef> = None;
     for id in ids {
         let w = match find_window(id) {
@@ -220,28 +222,48 @@ async fn request_many(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
         };
         let app = app_label(&window.app);
         first.get_or_insert_with(|| window.clone());
-        let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: "look".into(), window, group: Some(call.clone()) };
+        // A request that can't be signed is that app's line; the others are still asked.
+        let auth = match sign_ui_automation_auth() {
+            Ok(a) => a,
+            Err(e) => {
+                lines.push(format!("{id} {app}: couldn't ask: {e}"));
+                continue;
+            }
+        };
+        let body = DesktopAuthorizeRequest { auth, action: "look".into(), window, group: Some(call.clone()) };
         let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 30).await;
         lines.push(match answer.as_ref().map(read_answer) {
             Ok(Asked::Granted) => format!("{id} {app}: allowed already; you may use it now"),
-            Ok(Asked::Pending) => {
-                pending += 1;
+            Ok(Asked::Pending { grouped: true }) => {
+                grouped += 1;
                 format!("{id} {app}: asked; the user decides")
+            }
+            Ok(Asked::Pending { grouped: false }) => {
+                alone += 1;
+                format!("{id} {app}: asked; the user decides, and its own note will come by itself")
             }
             Ok(Asked::No(why)) => format!("{id} {app}: {why}"),
             Err(e) => format!("{id} {app}: {e}"),
         });
     }
-    // Every request is filed: from here the call's answer may be sent.
-    if let (true, Some(window)) = (pending > 0, first) {
-        let seal = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: "seal".into(), window, group: Some(call) };
-        let _ = post(cx, "/api/v1/agent/desktop/authorize", &seal, 30).await;
+    // Every request is filed: from here the call's answer may be sent. Tried twice; a group the seal
+    // never reached is ended by srv's own deadline.
+    if let (true, Some(window)) = (grouped > 0, first) {
+        for _ in 0..2 {
+            let Ok(auth) = sign_ui_automation_auth() else { continue };
+            let seal = DesktopAuthorizeRequest { auth, action: "seal".into(), window: window.clone(), group: Some(call.clone()) };
+            if post(cx, "/api/v1/agent/desktop/authorize", &seal, 30).await.is_ok() {
+                break;
+            }
+        }
     }
-    let tail = if pending > 0 {
-        " Each asked app is its own request, with its own card and its own answer. One [AgentMux] note will name every one as allowed, declined or vetoed when all are decided: don't wait for it or ask again; carry on with other work or end your turn."
-    } else {
-        ""
-    };
+    let mut tail = String::new();
+    if grouped > 0 {
+        tail.push_str(" The asked apps are each their own request, with their own card and answer. One [AgentMux] note will name every one of them as allowed, declined or vetoed when all are decided: don't wait for it or ask again; carry on with other work or end your turn.");
+    }
+    if alone > 0 {
+        tail.push_str(" An app that was already asked for sends its own note.");
+    }
     Ok(format!("{}\n{tail}", lines.join("\n")).trim_end().to_string())
 }
 
@@ -702,7 +724,8 @@ mod tests {
     #[test]
     fn an_answer_is_sorted_into_granted_asked_or_no() {
         assert_eq!(read_answer(&json!({ "status": "allow", "message": "" })), Asked::Granted);
-        assert_eq!(read_answer(&json!({ "status": "pending", "message": "asked" })), Asked::Pending);
+        assert_eq!(read_answer(&json!({ "status": "pending", "message": "asked" })), Asked::Pending { grouped: false });
+        assert_eq!(read_answer(&json!({ "status": "pending", "message": "asked", "grouped": true })), Asked::Pending { grouped: true });
         assert_eq!(read_answer(&json!({ "status": "denied", "message": "no" })), Asked::No("no".into()));
         assert_eq!(read_answer(&json!({ "status": "refused", "message": "blocked" })), Asked::No("blocked".into()));
         assert_eq!(read_answer(&json!({ "status": "stopped" })), Asked::No("Desktop refused this".into()));

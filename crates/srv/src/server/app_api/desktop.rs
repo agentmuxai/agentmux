@@ -360,8 +360,16 @@ pub(crate) async fn handle_authorize(
                         remember_target(&id, GrantTarget { uid: uid.clone(), agent: agent.clone(), block_id: block_id.clone(), app: app.clone(), minutes: p.grant_minutes });
                         audit_line(&agent, w, &req.action, "asked", json!({ "request": id }));
                         let review = filed["review"].as_str().unwrap_or("");
-                        let grouped = req.group.as_deref().is_some_and(|call| group::add(&group::key(&uid, &block_id, call), &block_id, &id, &app));
-                        reply("pending", &if grouped { grouped_pending_message(&app, review) } else { pending_message(&app, review) })
+                        let added = req
+                            .group
+                            .as_deref()
+                            .map(|call| (group::key(&uid, &block_id, call), group::add(&group::key(&uid, &block_id, call), &block_id, &id, &app)));
+                        let grouped = added.as_ref().is_some_and(|(_, a)| a.grouped());
+                        if let Some((key, group::Added::Created)) = added {
+                            start_group_deadline(state.clone(), key);
+                        }
+                        let message = if grouped { grouped_pending_message(&app, review) } else { pending_message(&app, review) };
+                        Json(json!({ "status": "pending", "message": message, "grouped": grouped })).into_response()
                     }
                     Err(e) => reply("refused", &e),
                 };
@@ -378,6 +386,18 @@ fn pending_message(app: &str, review: &str) -> String {
          super agent approves, the person sees a countdown and can veto it. Don't wait for it: carry on with other \
          work or end your turn. An [AgentMux] note brings the answer, then call Desktop again."
     )
+}
+
+/// End a call's group when its time is up, so a request that ends in a way nothing reported can't
+/// hold its agent's notes back: the agent is told what is known, and what is still waiting sends its
+/// own note.
+fn start_group_deadline(_state: AppState, key: String) {
+    tokio::spawn(async move {
+        tokio::time::sleep(group::GROUP_TTL).await;
+        if let Some((block_id, said)) = group::flush(&key, &group::request_is_open) {
+            tell(&block_id, &said);
+        }
+    });
 }
 
 /// What a call that asked for several apps answers for each app that had to be asked.

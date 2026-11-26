@@ -85,6 +85,9 @@ fn go_ahead(state: &AppState, request_id: &str, no_reviewer: bool) {
         // Nothing here can do it: say so, rather than count down to nothing.
         if requests::registry().finish(request_id, Status::Expired, now_ms()).is_ok() {
             window::audit_step(state, "no super agent", &request, "sensitive.fallback", false, Some("nothing can run it from here"), "expired");
+            if crate::server::app_api::desktop::settled(&request, crate::server::app_api::desktop_group::Settled::Ended) {
+                return;
+            }
             window::tell_askers(&request, &format!("[AgentMux] Nobody reviewed your request to {} ({why}), and this AgentMux can't run it, so it ended.", request.summary));
         }
         return;
@@ -94,6 +97,7 @@ fn go_ahead(state: &AppState, request_id: &str, no_reviewer: bool) {
     let window_secs = spec.fallback_window_secs();
     if let Err(e) = window::open(state, request_id, Duration::from_secs(window_secs)) {
         tracing::warn!(request_id, error = %e, "sensitive request: the fallback countdown did not start");
+        crate::server::app_api::desktop::settled(&request, crate::server::app_api::desktop_group::Settled::Ended);
         return;
     }
     window::audit_step(state, "no super agent", &request, "sensitive.fallback", true, None, &format!("countdown {window_secs} s, no super agent reviewed it"));
