@@ -42,9 +42,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     Ok(with_look(arguments, cx, said).await)
                 }
                 Some("wait") => wait(arguments).await,
+                Some("request") => request_many(arguments, cx).await,
                 Some("release") => release(arguments, cx).await,
                 other => anyhow::bail!(
-                    "Desktop: unknown action {other:?}; use apps, look, click, scroll, drag, type, key, wait or release"
+                    "Desktop: unknown action {other:?}; use apps, request, look, click, scroll, drag, type, key, wait or release"
                 ),
             }
         }
@@ -135,12 +136,135 @@ async fn post(cx: &ToolCtx<'_>, path: &str, body: &impl serde::Serialize, secs: 
 /// asks them and answers `pending` at once, and their answer reaches the agent
 /// as an [AgentMux] note.
 async fn authorize(cx: &ToolCtx<'_>, action: &str, w: &AgentMuxWindowInfo, id: u32) -> Result<String> {
-    let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: action.to_string(), window: window_ref(w, id)? };
+    let body = DesktopAuthorizeRequest { auth: sign_ui_automation_auth()?, action: action.to_string(), window: window_ref(w, id)?, group: None };
     let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 30).await?;
     match answer["status"].as_str() {
         Some("allow") => Ok(answer["grant_id"].as_str().unwrap_or("").to_string()),
         _ => anyhow::bail!("{}", answer["message"].as_str().unwrap_or("Desktop refused this")),
     }
+}
+
+/// What srv answered about one window in a call that asks for several.
+#[derive(Debug, PartialEq, Eq)]
+enum Asked {
+    /// A grant is live already.
+    Granted,
+    /// The user is being asked. `grouped`: the answer comes in the one note for the whole call;
+    /// otherwise this app's own note comes by itself.
+    Pending { grouped: bool },
+    /// Not now, and why (refused, blocked, denied, stopped, off).
+    No(String),
+}
+
+/// Sort srv's answer to one window of a `request` call.
+fn read_answer(answer: &Value) -> Asked {
+    let message = answer["message"].as_str().unwrap_or("Desktop refused this").to_string();
+    match answer["status"].as_str() {
+        Some("allow") => Asked::Granted,
+        Some("pending") => Asked::Pending { grouped: answer["grouped"].as_bool() == Some(true) },
+        _ => Asked::No(message),
+    }
+}
+
+/// The windows a `request` call names, without repeats, at most [`MAX_REQUEST_WINDOWS`].
+fn request_windows(args: &Value) -> Result<Vec<u32>> {
+    let list = args
+        .get("windows")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("request needs windows: the ids `apps` listed, for the apps you need"))?;
+    let mut ids: Vec<u32> = Vec::new();
+    for v in list {
+        let id = v
+            .as_i64()
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or_else(|| anyhow::anyhow!("windows holds window ids from `apps`; {v} is not one"))?;
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.is_empty() {
+        anyhow::bail!("request needs at least one window id from `apps`");
+    }
+    if ids.len() > MAX_REQUEST_WINDOWS {
+        anyhow::bail!("request asks for at most {MAX_REQUEST_WINDOWS} windows at once; you named {}", ids.len());
+    }
+    Ok(ids)
+}
+
+/// Windows one `request` call may name.
+const MAX_REQUEST_WINDOWS: usize = 8;
+
+/// Ask for several apps in one call. Each app is its own request to the user, with its own card,
+/// countdown, veto and grant; nothing about one decides another. What is shared is the answer: one
+/// `[AgentMux]` note names every app as allowed, declined or vetoed once all have been decided.
+async fn request_many(args: &Value, cx: &ToolCtx<'_>) -> Result<String> {
+    let ids = request_windows(args)?;
+    input::win::ensure_dpi_aware();
+    let call = uuid::Uuid::new_v4().to_string();
+    let mut lines = Vec::new();
+    let mut grouped = 0usize;
+    let mut alone = 0usize;
+    let mut first: Option<DesktopWindowRef> = None;
+    for id in ids {
+        let w = match find_window(id) {
+            Ok(w) => w,
+            Err(e) => {
+                lines.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        let window = match window_ref(&w, id) {
+            Ok(r) => r,
+            Err(e) => {
+                lines.push(format!("{id}: {e}"));
+                continue;
+            }
+        };
+        let app = app_label(&window.app);
+        first.get_or_insert_with(|| window.clone());
+        // A request that can't be signed is that app's line; the others are still asked.
+        let auth = match sign_ui_automation_auth() {
+            Ok(a) => a,
+            Err(e) => {
+                lines.push(format!("{id} {app}: couldn't ask: {e}"));
+                continue;
+            }
+        };
+        let body = DesktopAuthorizeRequest { auth, action: "look".into(), window, group: Some(call.clone()) };
+        let answer = post(cx, "/api/v1/agent/desktop/authorize", &body, 30).await;
+        lines.push(match answer.as_ref().map(read_answer) {
+            Ok(Asked::Granted) => format!("{id} {app}: allowed already; you may use it now"),
+            Ok(Asked::Pending { grouped: true }) => {
+                grouped += 1;
+                format!("{id} {app}: asked; the user decides")
+            }
+            Ok(Asked::Pending { grouped: false }) => {
+                alone += 1;
+                format!("{id} {app}: asked; the user decides, and its own note will come by itself")
+            }
+            Ok(Asked::No(why)) => format!("{id} {app}: {why}"),
+            Err(e) => format!("{id} {app}: {e}"),
+        });
+    }
+    // Every request is filed: from here the call's answer may be sent. Tried twice; a group the seal
+    // never reached is ended by srv's own deadline.
+    if let (true, Some(window)) = (grouped > 0, first) {
+        for _ in 0..2 {
+            let Ok(auth) = sign_ui_automation_auth() else { continue };
+            let seal = DesktopAuthorizeRequest { auth, action: "seal".into(), window: window.clone(), group: Some(call.clone()) };
+            if post(cx, "/api/v1/agent/desktop/authorize", &seal, 30).await.is_ok() {
+                break;
+            }
+        }
+    }
+    let mut tail = String::new();
+    if grouped > 0 {
+        tail.push_str(" The asked apps are each their own request, with their own card and answer. One [AgentMux] note will name every one of them as allowed, declined or vetoed when all are decided: don't wait for it or ask again; carry on with other work or end your turn.");
+    }
+    if alone > 0 {
+        tail.push_str(" An app that was already asked for sends its own note.");
+    }
+    Ok(format!("{}\n{tail}", lines.join("\n")).trim_end().to_string())
 }
 
 /// Tell srv what an authorized action did. Best effort: the action has
@@ -595,5 +719,26 @@ mod tests {
         assert_eq!(parse_region(&json!({ "region": null })).unwrap(), None);
         assert_eq!(parse_region(&json!({ "region": { "x": 1, "y": 2, "w": 30, "h": 40 } })).unwrap(), Some((1, 2, 30, 40)));
         assert!(parse_region(&json!({ "region": { "x": 1, "y": 2, "w": 30 } })).unwrap_err().to_string().contains("h is missing"));
+    }
+
+    #[test]
+    fn an_answer_is_sorted_into_granted_asked_or_no() {
+        assert_eq!(read_answer(&json!({ "status": "allow", "message": "" })), Asked::Granted);
+        assert_eq!(read_answer(&json!({ "status": "pending", "message": "asked" })), Asked::Pending { grouped: false });
+        assert_eq!(read_answer(&json!({ "status": "pending", "message": "asked", "grouped": true })), Asked::Pending { grouped: true });
+        assert_eq!(read_answer(&json!({ "status": "denied", "message": "no" })), Asked::No("no".into()));
+        assert_eq!(read_answer(&json!({ "status": "refused", "message": "blocked" })), Asked::No("blocked".into()));
+        assert_eq!(read_answer(&json!({ "status": "stopped" })), Asked::No("Desktop refused this".into()));
+    }
+
+    #[test]
+    fn a_request_names_a_few_window_ids_once_each() {
+        assert_eq!(request_windows(&json!({ "windows": [3, 5, 3] })).unwrap(), vec![3, 5]);
+        assert!(request_windows(&json!({})).is_err());
+        assert!(request_windows(&json!({ "windows": [] })).is_err());
+        assert!(request_windows(&json!({ "windows": [-1] })).is_err());
+        assert!(request_windows(&json!({ "windows": ["x"] })).is_err());
+        let nine: Vec<i64> = (1..=9).collect();
+        assert!(request_windows(&json!({ "windows": nine })).unwrap_err().to_string().contains("at most 8"));
     }
 }
