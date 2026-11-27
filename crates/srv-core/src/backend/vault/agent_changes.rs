@@ -181,14 +181,22 @@ fn signins_field(entry: &VaultRow, field: &str) -> String {
 /// unless `include_seen`. A proposal, and a new value on an entry the person made, come first.
 pub fn list(store: &Store, entry: Option<&str>, include_seen: bool) -> Result<Vec<AgentChange>, String> {
     versions::prune(store);
-    let rows = store.vault_activity_agent_changes(now_ms() - LOOK_BACK_MS, &ACTIONS, MOST).map_err(|e| e.to_string())?;
+    let since = now_ms() - LOOK_BACK_MS;
+    let rows = store.vault_activity_agent_changes(since, &ACTIONS, entry, include_seen, MOST).map_err(|e| e.to_string())?;
     let (through, marked) = store.vault_changes_seen().map_err(|e| e.to_string())?;
-    let mut out: Vec<AgentChange> = rows
-        .iter()
-        .filter(|r| entry.is_none_or(|id| r.entry_id == id))
-        .filter_map(|r| change_of(store, &rows, r, r.seq <= through || marked.contains(&r.seq)))
-        .filter(|c| include_seen || !c.seen)
-        .collect();
+    let mut histories = BTreeMap::new();
+    let mut out = Vec::new();
+    for row in &rows {
+        if !histories.contains_key(&row.entry_id) {
+            let history = store.vault_activity_agent_changes(since, &ACTIONS, Some(&row.entry_id), true, -1).map_err(|e| e.to_string())?;
+            histories.insert(row.entry_id.clone(), history);
+        }
+        if let Some(change) = change_of(store, &histories[&row.entry_id], row, row.seq <= through || marked.contains(&row.seq)) {
+            if include_seen || !change.seen {
+                out.push(change);
+            }
+        }
+    }
     out.sort_by_key(|c| (!(c.kind == "proposal" || c.replaces_yours), std::cmp::Reverse(c.seq)));
     Ok(out)
 }
@@ -244,7 +252,7 @@ pub fn seen_all(store: &Store) -> Result<(), String> {
 /// recorded as theirs. Refused when there is nothing to put back (past its 7 days).
 pub fn undo(store: &Store, seq: i64) -> Result<(), String> {
     let row = store.vault_activity_get(seq).map_err(|e| e.to_string())?.filter(|r| r.actor_kind == "agent").ok_or("no such change by an agent")?;
-    let rows = store.vault_activity_agent_changes(now_ms() - LOOK_BACK_MS, &ACTIONS, MOST).map_err(|e| e.to_string())?;
+    let rows = store.vault_activity_agent_changes(now_ms() - LOOK_BACK_MS, &ACTIONS, Some(&row.entry_id), true, -1).map_err(|e| e.to_string())?;
     let change = change_of(store, &rows, &row, false).ok_or("that change is not there any more")?;
     let entry = store.vault_get(&change.entry_id).map_err(|e| e.to_string())?.ok_or("that entry is gone")?;
     match change.undo.as_str() {
