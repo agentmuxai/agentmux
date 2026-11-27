@@ -69,11 +69,39 @@ pub fn dump_dir_under(base: &Path, instance_key: &str) -> Option<PathBuf> {
 
 /// Sortable by name: zero-padded timestamp first.
 pub fn dump_file_name(unix_secs: u64, pid: u32) -> String {
-    format!("agentmux-host-hang-{unix_secs:012}-pid{pid}.dmp")
+    dump_file_name_with(HOST_FILE_PREFIX, unix_secs, pid)
+}
+
+/// File-name prefix of the host's hang dumps.
+const HOST_FILE_PREFIX: &str = "agentmux-host-hang-";
+
+/// `<prefix><zero-padded seconds>-pid<pid>.dmp`; the prefix ends with `-`.
+fn dump_file_name_with(prefix: &str, unix_secs: u64, pid: u32) -> String {
+    format!("{prefix}{unix_secs:012}-pid{pid}.dmp")
+}
+
+/// Srv wedge dumps kept per instance.
+pub const SRV_WEDGE_DUMPS_KEPT: usize = 3;
+
+/// Where a wedged srv's dump goes: srv's own crash-dump folder, which holds the crash monitor's
+/// dumps and socket. Pruning below only touches files with this module's prefix.
+pub const SRV_WEDGE_DIR: &str = r"C:\CrashDumps\agentmuxsrv";
+
+/// File-name prefix of one instance's srv wedge dumps (`agentmuxsrv-wedge-<instance_key>-`), so
+/// pruning one instance's dumps never deletes another running instance's. `None` for a key that is
+/// not a single plain path component.
+pub fn srv_wedge_prefix(instance_key: &str) -> Option<String> {
+    let plain = !instance_key.is_empty()
+        && instance_key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    plain.then(|| format!("agentmuxsrv-wedge-{instance_key}-"))
 }
 
 /// Delete all but the newest `keep` hang dumps in `dir`. Best-effort.
 pub fn prune_old_dumps(dir: &Path, keep: usize) {
+    prune_old_dumps_with(dir, HOST_FILE_PREFIX, keep);
+}
+
+fn prune_old_dumps_with(dir: &Path, prefix: &str, keep: usize) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -82,7 +110,7 @@ pub fn prune_old_dumps(dir: &Path, keep: usize) {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("agentmux-host-hang-") && n.ends_with(".dmp"))
+                .is_some_and(|n| n.starts_with(prefix) && n.ends_with(".dmp"))
         })
         .collect();
     dumps.sort();
@@ -150,6 +178,18 @@ unsafe extern "system" fn snapshot_callback(
 /// the handle. With `None` the process is opened by pid.
 #[cfg(target_os = "windows")]
 pub fn write_hang_dump(pid: u32, handle: Option<usize>, dir: &Path) -> Result<PathBuf, String> {
+    write_process_dump(pid, handle, dir, HOST_FILE_PREFIX, MAX_DUMPS_KEPT)
+}
+
+/// A wedged srv's dump, the same kind as [`write_hang_dump`], named with `prefix`
+/// (from [`srv_wedge_prefix`]) and keeping the newest [`SRV_WEDGE_DUMPS_KEPT`].
+#[cfg(target_os = "windows")]
+pub fn write_srv_wedge_dump(pid: u32, handle: Option<usize>, dir: &Path, prefix: &str) -> Result<PathBuf, String> {
+    write_process_dump(pid, handle, dir, prefix, SRV_WEDGE_DUMPS_KEPT)
+}
+
+#[cfg(target_os = "windows")]
+fn write_process_dump(pid: u32, handle: Option<usize>, dir: &Path, prefix: &str, keep: usize) -> Result<PathBuf, String> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Diagnostics::Debug::{
@@ -163,7 +203,7 @@ pub fn write_hang_dump(pid: u32, handle: Option<usize>, dir: &Path) -> Result<Pa
 
     std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let secs = agentmux_common::time::now_secs_u64();
-    let path = dir.join(dump_file_name(secs, pid));
+    let path = dir.join(dump_file_name_with(prefix, secs, pid));
     let file = std::fs::File::create(&path).map_err(|e| format!("create {}: {e}", path.display()))?;
 
     // SAFETY: OpenProcess/MiniDumpWriteDump/CloseHandle with a handle we own
@@ -223,7 +263,7 @@ pub fn write_hang_dump(pid: u32, handle: Option<usize>, dir: &Path) -> Result<Pa
     drop(file);
     match ok {
         Ok(()) => {
-            prune_old_dumps(dir, MAX_DUMPS_KEPT);
+            prune_old_dumps_with(dir, prefix, keep);
             Ok(path)
         }
         Err(e) => {
@@ -305,6 +345,38 @@ mod tests {
             left,
             vec![dump_file_name(5, 1), dump_file_name(6, 1), dump_file_name(7, 1), "notes.txt".into()]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn srv_wedge_pruning_keeps_three_per_instance_and_leaves_other_files_alone() {
+        assert!(srv_wedge_prefix("..").is_none() && srv_wedge_prefix("").is_none());
+        let (a, b) = (srv_wedge_prefix("aaaa").unwrap(), srv_wedge_prefix("bbbb").unwrap());
+        let dir = std::env::temp_dir().join(format!("amux-srv-wedge-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for t in 1..=5u64 {
+            std::fs::write(dir.join(dump_file_name_with(&a, t, 1)), b"x").unwrap();
+        }
+        std::fs::write(dir.join(dump_file_name_with(&b, 1, 2)), b"x").unwrap();
+        std::fs::write(dir.join("agentmuxsrv-1-2.dmp"), b"crash monitor dump").unwrap();
+        std::fs::write(dir.join("monitor.sock"), b"s").unwrap();
+
+        prune_old_dumps_with(&dir, &a, SRV_WEDGE_DUMPS_KEPT);
+
+        let mut left: Vec<String> =
+            std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        let mut want = vec![
+            dump_file_name_with(&a, 3, 1),
+            dump_file_name_with(&a, 4, 1),
+            dump_file_name_with(&a, 5, 1),
+            dump_file_name_with(&b, 1, 2),
+            "agentmuxsrv-1-2.dmp".into(),
+            "monitor.sock".into(),
+        ];
+        want.sort();
+        assert_eq!(left, want);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

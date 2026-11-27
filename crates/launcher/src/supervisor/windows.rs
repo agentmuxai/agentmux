@@ -856,22 +856,52 @@ pub(crate) async fn run_windows(
                             srv_recycle.misses()
                         ));
                         if let Some(reason) = decision {
-                            log(&format!(
-                                "[srv-liveness] srv wedged ({:?}: unresponsive to {} consecutive health \
-                                 probes) — forcing recycle",
-                                reason,
-                                srv_recycle.misses()
-                            ));
+                            let misses = srv_recycle.misses();
                             srv_recycle = crate::srv_liveness::RecyclePolicy::default();
-                            // Kill srv directly (not via J0/TerminateJobObject —
-                            // this is scoped to srv alone, not a whole-tree
-                            // teardown). The srv_status = srv_child.wait() arm
-                            // (next iteration) picks up the exit and runs the
-                            // already-shipped #2107 respawn/rebind/host-recycle
-                            // path unmodified — this arm's only job is deciding
-                            // "treat this as a crash".
-                            srv_killed_wedged = true;
-                            let _ = srv_child.start_kill();
+                            // The dump comes first: it is a wedged srv's only readable
+                            // stacks, and the kill ends them. It costs at most
+                            // WEDGE_DUMP_BUDGET (a snapshot of the process is quick; the
+                            // file is written from the snapshot).
+                            let dump_pid = srv_child.id();
+                            let dump_handle = srv_child.raw_handle().and_then(crate::host_hang_dump::copy_handle);
+                            let dump_prefix = crate::host_hang_dump::srv_wedge_prefix(&dir_hash);
+                            let dump = async move {
+                                let (Some(pid), Some(prefix)) = (dump_pid, dump_prefix.as_ref().cloned()) else {
+                                    if let Some(h) = dump_handle {
+                                        crate::host_hang_dump::close_copy(h);
+                                    }
+                                    return Err(format!("srv pid {dump_pid:?}, instance key usable: {}", dump_prefix.is_some()));
+                                };
+                                let written = tokio::task::spawn_blocking(move || {
+                                    let dir = std::path::Path::new(crate::host_hang_dump::SRV_WEDGE_DIR);
+                                    let out = crate::host_hang_dump::write_srv_wedge_dump(pid, dump_handle, dir, &prefix);
+                                    if let Some(h) = dump_handle {
+                                        crate::host_hang_dump::close_copy(h);
+                                    }
+                                    out
+                                })
+                                .await
+                                .map_err(|e| format!("dump task: {e}"))??;
+                                let bytes = std::fs::metadata(&written).map(|m| m.len()).unwrap_or(0);
+                                Ok((written, bytes))
+                            };
+                            crate::srv_liveness::dump_then_kill(dump, crate::srv_liveness::WEDGE_DUMP_BUDGET, |dump_note| {
+                                log(&format!(
+                                    "[srv-liveness] srv wedged ({:?}: unresponsive to {} consecutive health \
+                                     probes; {}) — forcing recycle",
+                                    reason, misses, dump_note
+                                ));
+                                // Kill srv directly (not via J0/TerminateJobObject —
+                                // this is scoped to srv alone, not a whole-tree
+                                // teardown). The srv_status = srv_child.wait() arm
+                                // (next iteration) picks up the exit and runs the
+                                // already-shipped #2107 respawn/rebind/host-recycle
+                                // path unmodified — this arm's only job is deciding
+                                // "treat this as a crash".
+                                srv_killed_wedged = true;
+                                let _ = srv_child.start_kill();
+                            })
+                            .await;
                         }
                     }
                 }
