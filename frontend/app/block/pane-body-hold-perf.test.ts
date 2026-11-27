@@ -14,7 +14,7 @@ vi.stubGlobal(
     "ResizeObserver",
     class {
         constructor(cb: (entries: unknown[]) => void) {
-            observed.report = (el) => cb([{ target: el, contentRect: { width: 0, height: 0 } }]);
+            observed.report = (el) => cb([{ target: el, contentRect: { width: (el as HTMLElement).clientWidth, height: (el as HTMLElement).clientHeight } }]);
         }
         observe() {}
         unobserve() {}
@@ -101,10 +101,41 @@ describe("[perf] border-content", () => {
 
     it("counts the size a body holds as the drag begins as no catch-up", () => {
         const el = frame({ w: 400, h: 300 });
+        const [dragging, setDragging] = createSignal(false);
+        const dispose = mount(dragging, el, "term");
         observed.report!(el); // reported before the drag: not behind by anything
+        setDragging(true);
+        for (let i = 0; i < 6; i++) move();
+        setDragging(false);
+        dispose();
+        expect(lines(warn)[0]).toContain("mid-drag catch-ups none; behind at release 0");
+    });
+
+    it("takes a body whose frame went back to the size it holds as not behind", () => {
+        const size = { w: 400, h: 300 };
+        const el = frame(size);
         const [dragging, setDragging] = createSignal(true);
         const dispose = mount(dragging, el, "term");
         for (let i = 0; i < 6; i++) move();
+        size.w = 450;
+        observed.report!(el);
+        size.w = 400; // back where it was before the next catch-up
+        observed.report!(el);
+        vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS + 100);
+        setDragging(false);
+        dispose();
+        expect(lines(warn)[0]).toContain("mid-drag catch-ups none; behind at release 0");
+    });
+
+    it("counts a body that is never held (a browser pane) as behind by nothing", () => {
+        const size = { w: 400, h: 300 };
+        const el = frame(size);
+        const [dragging, setDragging] = createSignal(true);
+        const dispose = mount(dragging, el, "browser");
+        for (let i = 0; i < 6; i++) move();
+        size.w = 450;
+        observed.report!(el);
+        vi.advanceTimersByTime(DEFAULT_DRAG_REFRESH_MS + 100);
         setDragging(false);
         dispose();
         expect(lines(warn)[0]).toContain("mid-drag catch-ups none; behind at release 0");

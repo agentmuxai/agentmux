@@ -203,7 +203,8 @@ function removeCatchUp(run: CatchUp): void {
     catchUps.delete(run);
     const body = bodyOf.get(run);
     bodyOf.delete(run);
-    const since = body?.el ? behindSince.get(body.el) : undefined;
+    // A body that is never held (a browser pane's native page follows its frame) is behind by nothing.
+    const since = body?.el && holdsBodyDuringDrag(body.view) ? behindSince.get(body.el) : undefined;
     if (stats && since !== undefined) stats.atRelease.push(performance.now() - since);
     if (catchUps.size > 0) return;
     if (stats) logContentStats(stats);
@@ -284,7 +285,11 @@ export function usePaneBodyHold(
             // The size it holds as the drag begins is no catch-up: nothing is behind yet.
             if (!begun) behindSince.delete(el);
             const next = bodySize(el);
-            if (sameHold(untrack(hold), next)) return false;
+            if (sameHold(untrack(hold), next)) {
+                // The frame went back to the size the body holds: it is not behind by anything now.
+                if (begun) behindSince.delete(el);
+                return false;
+            }
             setHold(next);
             if (begun) noteCaughtUp(untrack(view) ?? "?", el);
             return true;
