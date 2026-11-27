@@ -15,6 +15,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { MIN_MOVES, PERF_LOG_PREFIX, summarizeLags } from "@/app/element/ui/drag-lag";
 
 /** The size, in CSS px, of the box a pane's view is laid out in: its content box. */
 export interface BodyHold {
@@ -99,8 +100,56 @@ const heavy = new WeakSet<CatchUp>();
 let lastRan: { run: CatchUp; at: number } | null = null;
 
 
+/**
+ * How far behind its frame a held body was, per drag, as one `[perf] border-content` line next to the border's own
+ * (`[perf] border-drag`, element/ui/drag-lag.ts): the border's lag says the drag was smooth, this says how fresh the
+ * content was while it was. A body is behind from the first frame its frame changed size after its last catch-up (the
+ * size observer's report) until it catches up, or the drag ends. Measure only: it changes nothing the clock does.
+ */
+interface ContentStats {
+    moves: number;
+    firstMoveAt: number;
+    lastMoveAt: number;
+    /** Per view kind: the catch-ups that ran mid-drag, and how far behind each body was when it caught up (ms). */
+    byView: Map<string, { n: number; behind: number[] }>;
+    /** Bodies still behind when the drag ended, by how far (ms). */
+    atRelease: number[];
+}
+let stats: ContentStats | null = null;
+/** When each body's frame first changed size after its last catch-up (the size observer's report). */
+const behindSince = new WeakMap<HTMLElement, number>();
+/** Each held body's view kind and element, for the numbers above. */
+const bodyOf = new Map<CatchUp, { view: string; el: HTMLElement | null | undefined }>();
+
+function noteCaughtUp(view: string, el: HTMLElement): void {
+    const since = behindSince.get(el);
+    behindSince.delete(el);
+    if (!stats || since === undefined) return;
+    const v = stats.byView.get(view) ?? { n: 0, behind: [] };
+    v.n++;
+    v.behind.push(performance.now() - since);
+    stats.byView.set(view, v);
+}
+
+function logContentStats(s: ContentStats): void {
+    if (s.moves < MIN_MOVES) return;
+    const views = [...s.byView].map(([view, v]) => {
+        const b = summarizeLags(v.n, v.behind);
+        return `${view}(n=${v.n} p50=${b.p50}ms worst=${b.worst}ms)`;
+    });
+    const tail = summarizeLags(s.atRelease.length, s.atRelease);
+    console.warn(
+        `${PERF_LOG_PREFIX} border-content moves=${s.moves} drag=${Math.round(s.lastMoveAt - s.firstMoveAt)}ms refresh=${dragRefreshMs()}ms ` +
+            `mid-drag catch-ups ${views.length ? views.join(" ") : "none"}; behind at release ${tail.drawn}${tail.drawn ? ` worst=${tail.worst}ms` : ""}`
+    );
+}
+
 function onDragPointerMove(e: Event): void {
     lastMoveAt = e.timeStamp;
+    if (!stats) return;
+    stats.moves++;
+    stats.firstMoveAt ||= e.timeStamp;
+    stats.lastMoveAt = e.timeStamp;
 }
 
 function clockStep(t: number): void {
@@ -137,8 +186,10 @@ function clockStep(t: number): void {
     clockFrame = requestAnimationFrame(clockStep);
 }
 
-function addCatchUp(run: CatchUp): void {
+function addCatchUp(run: CatchUp, body: { view: string; el: HTMLElement | null | undefined }): void {
+    bodyOf.set(run, body);
     if (catchUps.size === 0) {
+        stats = { moves: 0, firstMoveAt: 0, lastMoveAt: 0, byView: new Map(), atRelease: [] };
         lastFrameAt = 0;
         lastRoundAt = performance.now();
         lastMoveAt = lastRoundAt;
@@ -150,7 +201,13 @@ function addCatchUp(run: CatchUp): void {
 
 function removeCatchUp(run: CatchUp): void {
     catchUps.delete(run);
+    const body = bodyOf.get(run);
+    bodyOf.delete(run);
+    const since = body?.el ? behindSince.get(body.el) : undefined;
+    if (stats && since !== undefined) stats.atRelease.push(performance.now() - since);
     if (catchUps.size > 0) return;
+    if (stats) logContentStats(stats);
+    stats = null;
     window.removeEventListener("pointermove", onDragPointerMove, { capture: true });
     if (clockFrame !== undefined) cancelAnimationFrame(clockFrame);
     clockFrame = undefined;
@@ -182,6 +239,8 @@ function observeBody(el: HTMLElement): void {
     if (typeof ResizeObserver === "undefined") return;
     sizeObserver ??= new ResizeObserver((entries) => {
         for (const e of entries) {
+            const el = e.target as HTMLElement;
+            if (!behindSince.has(el)) behindSince.set(el, performance.now());
             const box = e.contentBoxSize?.[0];
             const width = box ? box.inlineSize : e.contentRect.width;
             const height = box ? box.blockSize : e.contentRect.height;
@@ -218,19 +277,24 @@ export function usePaneBodyHold(
     const [hold, setHold] = createSignal<BodyHold | null>(null, { equals: sameHold });
     createEffect(() => {
         if (!dragging()) return setHold(null);
+        let begun = false;
         const catchUp: CatchUp = () => {
             const el = content();
             if (!el || !holdsBodyDuringDrag(untrack(view))) return false;
+            // The size it holds as the drag begins is no catch-up: nothing is behind yet.
+            if (!begun) behindSince.delete(el);
             const next = bodySize(el);
             if (sameHold(untrack(hold), next)) return false;
             setHold(next);
+            if (begun) noteCaughtUp(untrack(view) ?? "?", el);
             return true;
         };
         // The body holds the size it has as the drag begins; later it catches up with the clock.
         catchUp();
+        begun = true;
         const kind = untrack(view);
         if (kind !== undefined && HEAVY_VIEWS.has(kind)) heavy.add(catchUp);
-        addCatchUp(catchUp);
+        addCatchUp(catchUp, { view: untrack(view) ?? "?", el: content() });
         onCleanup(() => removeCatchUp(catchUp));
     });
     createEffect(() => {
