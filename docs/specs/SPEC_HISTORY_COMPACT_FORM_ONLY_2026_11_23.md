@@ -3,7 +3,7 @@
 **Date:** 2026-11-23
 **Author:** Agent5
 **Type:** Spec (a storage and retention change; what a person reads of a conversation does not change)
-**Status:** approved; built in the pull requests of section 15.
+**Status:** active. Approved for the build; built in the pull requests of section 15.
 **Area:** history store, agent sessions, retention, data at rest
 **Supersedes:** `SPEC_HISTORY_CONSOLIDATION_NO_RAW_RETENTION_2026_11_14.md` (never built; its migration protocol, §6 and §8 there, is reused here). **Builds on:** `SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md` (frames, the framer, recovery rules), which stays in force; its rule 6, "history is kept forever", is restated in §10.
 **Task:** #48525 (spec), #48526 (build).
