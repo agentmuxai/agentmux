@@ -38,7 +38,7 @@ use super::errors::ResolverError;
 /// stores a JSON token blob, of which only its `access_token` is the
 /// credential (`oauth_tokens::bearer_value`). A plain key is unchanged.
 pub fn resolve_secret(secret_ref: &SecretRef) -> Result<String, ResolverError> {
-    resolve_stored(secret_ref).map(crate::identity::oauth_tokens::bearer_value)
+    resolve_stored(secret_ref, None).map(crate::identity::oauth_tokens::bearer_value)
 }
 
 /// An account connected with OAuth (GitHub's tokens last hours) is refreshed before its token goes
@@ -72,7 +72,7 @@ pub fn resolve_account_secret(
     identity_store: &std::sync::Arc<Store>,
 ) -> Result<String, ResolverError> {
     refresh_oauth_token_if_due(account, id_store, identity_store);
-    resolve_secret(&account.secret_ref)
+    resolve_stored(&account.secret_ref, Some(&**identity_store)).map(crate::identity::oauth_tokens::bearer_value)
 }
 
 /// An AWS Secrets Manager secret's text (or the field `json_path` names in a JSON one), read with the host's own AWS
@@ -108,7 +108,8 @@ fn secrets_manager_value_at<R: Runner>(runner: &R, path: &str, json_path: Option
     Ok(value.to_string())
 }
 
-fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
+/// `vault` is the store that holds the Vault; without it a `Vault` reference cannot be read.
+fn resolve_stored(secret_ref: &SecretRef, vault: Option<&Store>) -> Result<String, ResolverError> {
     match secret_ref {
         SecretRef::Env { env_var } => std::env::var(env_var)
             .map_err(|_| ResolverError::EnvVarMissing(env_var.clone())),
@@ -142,6 +143,10 @@ fn resolve_stored(secret_ref: &SecretRef) -> Result<String, ResolverError> {
             crate::identity::secret_store::get(account_id)
                 .map(|z| z.to_string())
                 .map_err(ResolverError::KeychainError)
+        }
+        SecretRef::Vault { entry } => {
+            let store = vault.ok_or_else(|| ResolverError::VaultError("no Vault to read the key from".into()))?;
+            crate::backend::vault::account_key::read(store, entry).map(|k| k.to_string()).map_err(ResolverError::VaultError)
         }
     }
 }

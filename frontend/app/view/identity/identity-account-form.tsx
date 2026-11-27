@@ -11,6 +11,7 @@ import type {
     SecretRef,
 } from "./identity-model";
 import { PROVIDER_LABELS, refreshAccountCache } from "./identity-model";
+import { keepsPastedKey } from "./pasted-key";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
@@ -127,7 +128,9 @@ function createFormFields(editing: Accessor<Account | null>, preset: AddPreset):
     const [provider, setProvider] = createSignal<AccountProvider>(editing()?.provider ?? preset?.provider ?? "github");
     const [kind, setKind] = createSignal<AccountKind>(editing()?.kind ?? preset?.kind ?? "pat");
     const [displayName, setDisplayName] = createSignal(editing()?.display_name ?? "");
-    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(editing()?.secret_ref?.backend ?? "keychain");
+    // A key kept in the Vault is shown and replaced like one in the keychain.
+    const initialBackend = keepsPastedKey(editing() ?? {}) ? "keychain" : editing()?.secret_ref?.backend;
+    const [secretBackend, setSecretBackend] = createSignal<SecretRef["backend"]>(initialBackend ?? "keychain");
     const [secretEnvVar, setSecretEnvVar] = createSignal(editing()?.secret_ref?.env_var ?? "");
     const [secretSmPath, setSecretSmPath] = createSignal(editing()?.secret_ref?.sm_path ?? "");
     const [secretSmJsonPath, setSecretSmJsonPath] = createSignal(editing()?.secret_ref?.sm_json_path ?? "");
@@ -158,7 +161,7 @@ function createFormFields(editing: Accessor<Account | null>, preset: AddPreset):
 // never read back into the UI. Existing keychain accounts render locked
 // (masked) and require Replace to re-enter.
 function createKeyFlow(editing: Accessor<Account | null>): KeyFlow {
-    const editingIsKeychain = editing()?.secret_ref?.backend === "keychain";
+    const editingIsKeychain = keepsPastedKey(editing() ?? {});
     const [keychainKey, setKeychainKey] = createSignal("");
     const [keyBusy, setKeyBusy] = createSignal(false);
     const [keyError, setKeyError] = createSignal<string | null>(null);
@@ -215,6 +218,11 @@ function buildAccount(ctx: FormCtx): Omit<Account, "id" | "status" | "created_at
         // keychain accounts go through the key flow, not this path.
         secretRef.service = editing()?.secret_ref?.service;
         secretRef.account = editing()?.secret_ref?.account;
+        // A key kept in the Vault keeps its entry the same way.
+        if (editing()?.secret_ref?.backend === "vault") {
+            secretRef.backend = "vault";
+            secretRef.entry = editing()?.secret_ref?.entry;
+        }
     }
 
     const context = buildContext(ctx);

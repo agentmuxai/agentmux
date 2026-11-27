@@ -69,6 +69,11 @@ pub fn keychain(account_id: &str, secret: &str) {
     hold(&owner, secret, None);
 }
 
+/// An API key account's key, read from or written to its Vault entry `entry`.
+pub fn account_key(entry: &str, key: &str) {
+    hold(&format!("account-key:{entry}"), key, None);
+}
+
 /// The cloud sign-in's tokens (`expires_at` in unix seconds, 0 when unknown). The access and id tokens are withheld
 /// until they expire, the refresh token until the sign-in ends.
 pub fn cloud_sign_in(access: &str, refresh: &str, id: &str, expires_at: i64) {

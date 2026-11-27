@@ -21,6 +21,7 @@ import { failoverToggle } from "./account-failover";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { AccountUsageField } from "@/app/view/account-usage/account-usage";
 import type { Account, IdentityViewModel } from "./identity-model";
+import { keepsPastedKey } from "./pasted-key";
 import { accountLabel, KIND_LABELS, PROVIDER_LABELS, revokeFailureText, revokesOnDelete } from "./identity-model";
 import "./identity-view.scss";
 
@@ -410,8 +411,11 @@ function SecretFields({ s }: { s: PanelState }) {
             <Show when={account.secret_ref?.backend === "plaintext_dev"}>
                 <DetailField label={t("accountsTab.field.value")} value="••••••••••••" />
             </Show>
-            <Show when={account.secret_ref?.backend === "keychain"}>
-                <DetailField label={t("accountsTab.field.storedIn")} value={t("accountsTab.osKeychain")} />
+            <Show when={keepsPastedKey(account)}>
+                <DetailField
+                    label={t("accountsTab.field.storedIn")}
+                    value={account.secret_ref?.backend === "vault" ? t("accountsTab.vault") : t("accountsTab.osKeychain")}
+                />
                 <DetailField label={t("accountsTab.field.key")} value={account.context.masked_tail ?? "••••••••"} />
             </Show>
             <Show when={account.secret_ref?.backend === "oauth_config_dir"}>
@@ -490,7 +494,7 @@ function PanelActions({ s }: { s: PanelState }) {
                     {t("accountsTab.action.reauth")}
                 </Button>
             </Show>
-            <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
+            <Show when={account.status === "unknown" && keepsPastedKey(account)}>
                 <Button
                     tone="accent"
                     class="identity-btn identity-btn-primary"
@@ -530,7 +534,7 @@ function useDeleteAccountCopy(model: IdentityViewModel, account: Account): { tit
     // srv signs a Google OAuth account out at Google before deleting it.
     const signsOut = revokesOnDelete(account) && account.provider === "google";
     const isKey =
-        !revokesOnDelete(account) && (backend === "keychain" || backend === "env" || backend === "secrets_manager");
+        !revokesOnDelete(account) && (keepsPastedKey(account) || backend === "env" || backend === "secrets_manager");
     const grantStays = revokesOnDelete(account) && !signsOut;
     const providerName = PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider;
     const editing = () => model.formOpenAtom() && model.editingAccountAtom()?.id === account.id;

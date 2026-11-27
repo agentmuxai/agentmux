@@ -26,9 +26,8 @@ export type AccountKind = "pat" | "role" | "api_key" | "env_ref" | "oauth";
 /** `needs_reauth`: the provider refused a refresh (`invalid_grant`); the user must reconnect. */
 export type AccountStatus = "valid" | "expired" | "invalid" | "unknown" | "checking" | "needs_reauth";
 export type IdentityTab = "accounts" | "assignments";
-
 export interface SecretRef {
-    backend: "env" | "secrets_manager" | "plaintext_dev" | "keychain" | "oauth_config_dir";
+    backend: "env" | "secrets_manager" | "plaintext_dev" | "keychain" | "vault" | "oauth_config_dir";
     env_var?: string;
     sm_path?: string;
     sm_json_path?: string;
@@ -38,6 +37,8 @@ export interface SecretRef {
     // docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
     service?: string;
     account?: string;
+    // vault only — the id of the api-key entry of the Vault that holds the key.
+    entry?: string;
     // oauth_config_dir only — the provider CLI's per-account config dir.
     // Tokens live in that dir (owned/refreshed by the CLI), never here.
     dir?: string;
@@ -328,6 +329,8 @@ function secretRefFromBackend(s: IdentityAccount["secret_ref"]): SecretRef {
             return { backend: "plaintext_dev", value: s.plaintext_dev };
         case "keychain":
             return { backend: "keychain", service: s.service, account: s.account };
+        case "vault":
+            return { backend: "vault", entry: s.entry };
         case "oauth_config_dir":
             return { backend: "oauth_config_dir", dir: s.dir };
     }
@@ -351,6 +354,8 @@ function secretRefToBackend(s: SecretRef): IdentityAccount["secret_ref"] {
             return { backend: "plaintext_dev", plaintext_dev: s.value ?? "" };
         case "keychain":
             return { backend: "keychain", service: s.service ?? "", account: s.account ?? "" };
+        case "vault":
+            return { backend: "vault", entry: s.entry ?? "" };
         case "oauth_config_dir":
             return { backend: "oauth_config_dir", dir: s.dir ?? "" };
     }

@@ -12,7 +12,7 @@ use serde_json::json;
 
 use super::identity::{revoke_keeps_account, DeleteIdentityAccountResult};
 use crate::backend::mps::Broker;
-use crate::backend::storage::store::{IdentityAccount, Store};
+use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 
 /// Revokes the account's grant at its provider, removes its credential material and rows, and
 /// announces it. With `require_revoke` a revoke that failed keeps the account (`deleted: false`),
@@ -38,7 +38,10 @@ pub(crate) async fn delete_identity_account(
             revoke: revoke_report,
         });
     }
-    let cleanup_report = remove_secrets(acct.clone()).await;
+    let cleanup_report = remove_secrets(acct.clone(), identity_store).await;
+    if acct.as_ref().is_some_and(|a| matches!(a.secret_ref, SecretRef::Vault { .. })) {
+        crate::server::vault_handlers::publish_change(broker);
+    }
     let outcome = mstore
         .identity_delete(id)
         .map_err(|e| format!("deleteidentityaccount: {e}"))?;
@@ -132,13 +135,25 @@ async fn revoke_at_provider(mstore: &Arc<Store>, acct: Option<&IdentityAccount>)
 /// What the cleanup did, returned to Connectors so a login that couldn't be removed is reported,
 /// not hidden (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H3). Null when there
 /// was no account row to clean up after.
-async fn remove_secrets(acct: Option<IdentityAccount>) -> serde_json::Value {
+async fn remove_secrets(acct: Option<IdentityAccount>, identity_store: &Arc<Store>) -> serde_json::Value {
     let Some(acct) = acct else { return serde_json::Value::Null };
+    if let SecretRef::Vault { entry } = &acct.secret_ref {
+        return remove_vault_entry(identity_store.clone(), entry.clone()).await;
+    }
     // Containment root for OAuth dirs: only paths inside ~/.agentmux/shared/identities/ are ever
     // removed (the legacy ~/.claude migration dir is the user's global CLI login: never ours to delete).
     let identities_root = agentmux_common::DataPaths::from_env().map(|p| p.identities_dir());
     match tokio::task::spawn_blocking(move || crate::identity::cleanup::cleanup_account_secrets(&acct, identities_root.as_deref())).await {
         Ok(outcome) => outcome.report(),
+        Err(e) => json!({ "outcome": "failed", "detail": e.to_string() }),
+    }
+}
+
+/// An API key account's key is a Vault entry: it goes with the account. A failure is reported like a keychain one.
+async fn remove_vault_entry(identity_store: Arc<Store>, entry: String) -> serde_json::Value {
+    match tokio::task::spawn_blocking(move || crate::backend::vault::account_key::remove(&identity_store, &entry)).await {
+        Ok(Ok(())) => json!({ "outcome": "removed" }),
+        Ok(Err(e)) => json!({ "outcome": "failed", "detail": e }),
         Err(e) => json!({ "outcome": "failed", "detail": e.to_string() }),
     }
 }

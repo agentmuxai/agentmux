@@ -83,5 +83,5 @@ export function modeLabel(mode: AuthMode, provider?: AccountProvider): { title: 
     if (provider === "github") return mode === "oauth" ? GITHUB_APP_CHOICE : GITHUB_TOKEN_CHOICE;
     return mode === "oauth"
         ? { title: "Connect with OAuth", sub: "Browser login — no key to manage" }
-        : { title: "Add API key / token", sub: "Validated & stored in your OS keychain" };
+        : { title: "Add API key / token", sub: "Validated & stored in your Vault" };
 }

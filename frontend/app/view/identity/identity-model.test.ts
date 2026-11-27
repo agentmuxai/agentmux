@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import * as identityModel from "./identity-model";
 import { __internal__ } from "./identity-model";
 import type { Account } from "./identity-model";
+import { keepsPastedKey } from "./pasted-key";
 
 // The helpers aren't re-exported; we round-trip through the public API
 // using a stub Account shape. The conversion happens inside
@@ -90,6 +91,16 @@ describe("identity-model SecretRef field-name translation", () => {
         expect(back).toEqual(wire);
     });
 
+    it("vault: keeps the entry id, and counts as a key srv keeps like the keychain", () => {
+        const wire = { backend: "vault", entry: "api-key-anthropic-account-key-work" } as const;
+        const fe = __internal__.secretRefFromBackend(wire);
+        expect(fe).toEqual({ backend: "vault", entry: wire.entry });
+        expect(__internal__.secretRefToBackend(fe)).toEqual(wire);
+        expect(keepsPastedKey({ secret_ref: fe })).toBe(true);
+        expect(keepsPastedKey({ secret_ref: { backend: "keychain" } })).toBe(true);
+        expect(keepsPastedKey({ secret_ref: { backend: "env" } })).toBe(false);
+    });
+
     it("every backend SecretRef variant maps to a defined frontend SecretRef", () => {
         // Exhaustiveness net: if the Rust enum grows another variant and
         // srv-types/this module lag, the specific new variant can't be listed
@@ -100,6 +111,7 @@ describe("identity-model SecretRef field-name translation", () => {
             { backend: "secrets_manager", sm_path: "p" },
             { backend: "plaintext_dev", plaintext_dev: "v" },
             { backend: "keychain", service: "s", account: "a" },
+            { backend: "vault", entry: "api-key-x" },
             { backend: "oauth_config_dir", dir: "d" },
         ];
         for (const w of wires) {
