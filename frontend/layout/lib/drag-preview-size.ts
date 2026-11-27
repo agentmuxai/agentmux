@@ -189,6 +189,17 @@ export function overPaneHeader(target: Element | null): boolean {
 }
 
 /**
+ * Whether a pointer resting on `target` is worth the drag ghost: in the pane's header, but not on one of its controls
+ * (Minimize, Maximize, Close, a menu). A pointer on a control is on its way to click it, and the ghost it would start
+ * after {@link DRAG_PREVIEW_HOVER_MS} costs the main thread 100 to 260 ms, which is the time the click is made in
+ * (#48231). A press on the header's own area still makes the ghost at once ({@link pressCanStartPaneDrag}).
+ */
+export function restingCanStartGhost(target: Element | null): boolean {
+    const header = target?.closest?.('[data-role="block-header"]');
+    return !!target && !!header && !pressOnControl(target, header);
+}
+
+/**
  * What a whole-pane drag can't start from, though it sits in the header:
  * a Pane Tab pill (it has its own draggable) and the tab strip's "+".
  * Shared by the pane's `canDrag` and {@link pressCanStartPaneDrag}.

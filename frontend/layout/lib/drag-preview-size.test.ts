@@ -14,6 +14,7 @@ import {
     dragImageChoice,
     headerGrabOffset,
     overPaneHeader,
+    restingCanStartGhost,
 } from "./drag-preview-size";
 
 const ratio = (s: { width: number; height: number }) => s.width / s.height;
@@ -244,5 +245,20 @@ describe("overPaneHeader", () => {
         expect(overPaneHeader(document.getElementById("in"))).toBe(true);
         expect(overPaneHeader(document.getElementById("body"))).toBe(false);
         expect(overPaneHeader(null)).toBe(false);
+    });
+});
+
+describe("restingCanStartGhost", () => {
+    it("a pointer resting on a header control makes no ghost: it is on its way to click (#48231)", () => {
+        document.body.innerHTML =
+            '<div data-role="block-header"><span class="title">T</span><button class="minimize"><svg class="glyph"></svg></button>' +
+            '<a class="link" href="#">l</a><div role="button" class="menu">m</div><span class="pane-grip" role="button">g</span></div>' +
+            '<div class="body"><p>text</p></div>';
+        const q = (sel: string) => document.querySelector(sel);
+        for (const sel of [".minimize", ".minimize .glyph", ".link", ".menu"]) expect(restingCanStartGhost(q(sel)), sel).toBe(false);
+        // The header's own area and the pane grip still earn the ghost; the body and nowhere do not.
+        for (const sel of [".title", '[data-role="block-header"]', ".pane-grip"]) expect(restingCanStartGhost(q(sel)), sel).toBe(true);
+        expect(restingCanStartGhost(q(".body p"))).toBe(false);
+        expect(restingCanStartGhost(null)).toBe(false);
     });
 });
