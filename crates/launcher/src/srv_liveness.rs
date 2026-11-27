@@ -169,6 +169,32 @@ impl RecyclePolicy {
     }
 }
 
+/// Longest the launcher waits for a wedged srv's dump before it kills srv anyway.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub const WEDGE_DUMP_BUDGET: Duration = Duration::from_secs(5);
+
+/// Take a dump of a srv that [`RecyclePolicy`] has decided is wedged, then kill it.
+///
+/// A deadlock raises no exception and the kill ends the process, so this is the only moment its
+/// threads' stacks can be read: `dump` runs first, and `kill` runs after it finishes, fails or
+/// has taken `budget`, never later. `kill` is handed one line saying what the dump came to, for
+/// the "srv wedged" log line. A dump that outlives the budget is left to finish on its own.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub async fn dump_then_kill<F>(
+    dump: F,
+    budget: Duration,
+    kill: impl FnOnce(String),
+) where
+    F: std::future::Future<Output = Result<(std::path::PathBuf, u64), String>>,
+{
+    let note = match tokio::time::timeout(budget, dump).await {
+        Ok(Ok((path, bytes))) => format!("minidump {} ({bytes} bytes)", path.display()),
+        Ok(Err(e)) => format!("no minidump: {e}"),
+        Err(_) => format!("no minidump: not written within {}s", budget.as_secs_f32()),
+    };
+    kill(note);
+}
+
 /// Health level of the probe's rolling average round-trip time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LatencyLevel {
@@ -325,6 +351,52 @@ mod tests {
 
     mod slow_vs_dead {
         use super::super::*;
+
+        /// The dump is requested before the kill, and the kill is told what it came to.
+        #[tokio::test]
+        async fn the_dump_is_taken_before_srv_is_killed() {
+            let order = std::sync::Mutex::new(Vec::<String>::new());
+            dump_then_kill(
+                async {
+                    order.lock().unwrap().push("dump".into());
+                    Ok((std::path::PathBuf::from("a.dmp"), 42))
+                },
+                Duration::from_secs(5),
+                |note| {
+                    order.lock().unwrap().push(format!("kill: {note}"));
+                },
+            )
+            .await;
+            assert_eq!(*order.lock().unwrap(), vec!["dump".to_string(), "kill: minidump a.dmp (42 bytes)".to_string()]);
+        }
+
+        #[tokio::test]
+        async fn a_failed_dump_does_not_stop_the_kill() {
+            let mut note = String::new();
+            dump_then_kill(async { Err("OpenProcess failed".to_string()) }, Duration::from_secs(5), |n| note = n).await;
+            assert_eq!(note, "no minidump: OpenProcess failed");
+        }
+
+        /// A dump stuck on a wedged process costs at most the budget.
+        #[tokio::test]
+        async fn a_dump_that_hangs_delays_the_kill_by_the_budget_only() {
+            let started = Instant::now();
+            let mut killed = false;
+            dump_then_kill(
+                async {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    Ok((std::path::PathBuf::from("late.dmp"), 1))
+                },
+                Duration::from_millis(150),
+                |note| {
+                    killed = true;
+                    assert!(note.starts_with("no minidump: not written within"), "{note}");
+                },
+            )
+            .await;
+            assert!(killed);
+            assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        }
         use std::time::{Duration, Instant};
 
         fn feed(p: &mut RecyclePolicy, t0: Instant, n: u32, cpu_step_ms: u64) -> Option<RecycleReason> {
