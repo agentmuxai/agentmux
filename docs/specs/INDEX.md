@@ -229,8 +229,9 @@ partial list.
 
 | Spec | Title | Status | Date | Replaces / replaced by |
 |---|---|---|---|---|
+| [`SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23`](SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md) | Spec: AgentMux keeps conversation history in one lossless compact form | active | 2026-11-23 | replaces part of [`SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21`](SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md) |
 | [`SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23`](SPEC_HISTORY_STORE_RECLAIM_SPACE_2026_10_23.md) | SPEC: give disk space back after history compression | active | 2026-10-23 |  |
-| [`SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21`](SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md) | Spec: the shared transcript store gets smaller: compressed frames, and the streaming deltas cleaned out | active | 2026-10-21 |  |
+| [`SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21`](SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md) | Spec: the shared transcript store gets smaller: compressed frames, and the streaming deltas cleaned out | active | 2026-10-21 | partly replaced by [`SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23`](SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md) |
 | [`SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19`](SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md) | Spec: an agent's transcript is written once, to the agent's own zone | active | 2026-10-19 |  |
 | [`SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19`](SPEC_FILESTORE_RECEIVE_TIME_SIDECAR_THROTTLE_2026_10_19.md) | Spec: the receive-time sidecar is written at most once a second per file | active | 2026-10-19 |  |
 | [`SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19`](SPEC_FILESTORE_STORE_CALLS_OFF_WORKERS_2026_10_19.md) | Spec: store calls stop pinning tokio workers while they wait for the connection | active | 2026-10-19 |  |

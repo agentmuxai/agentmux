@@ -3,8 +3,8 @@
 **Date:** 2026-11-23
 **Author:** Agent5
 **Type:** Spec (a storage and retention change; what a person reads of a conversation does not change)
-**Status:** active. Approved for the build; built in the pull requests of section 15.
-**Area:** history store, agent sessions, retention, data at rest
+**Status:** active — PR 1 (#8429) adds the pure compact module and checks L1 to L4; PRs 2 to 7 of section 15 remain.
+**Area:** history store
 **Supersedes:** `SPEC_HISTORY_CONSOLIDATION_NO_RAW_RETENTION_2026_11_14.md` (never built; its migration protocol, §6 and §8 there, is reused here). **Builds on:** `SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md` (frames, the framer, recovery rules), which stays in force; its rule 6, "history is kept forever", is restated in §10.
 **Task:** #48525 (spec), #48526 (build).
 
