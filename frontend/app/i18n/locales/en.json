@@ -2057,6 +2057,7 @@
     "accountsTab.removeAnyway": "Remove anyway",
     "accountsTab.unknown": "unknown",
     "accountsTab.osKeychain": "OS keychain",
+    "accountsTab.vault": "Vault",
     "accountsTab.cliConfigDir": "Provider CLI config dir (tokens owned by the CLI)",
     "accountsTab.providerViaCli": "{{provider}} (via {{cli}} CLI)",
     "accountsTab.section.secret": "Secret",

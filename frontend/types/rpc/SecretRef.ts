@@ -23,4 +23,8 @@ service: string,
 /**
  * Keychain account string — `"acct:<account_id>"`.
  */
-account: string, };
+account: string, } | { "backend": "vault", 
+/**
+ * The Vault entry's id.
+ */
+entry: string, };

@@ -136,8 +136,9 @@ struct KeyProbe {
     valid: bool,
 }
 
-/// Connectors → Accounts: validate (optional) and securely store an API key. The plaintext goes to the OS
-/// keychain; the DB row keeps only the `SecretRef::Keychain` pointer, the masked tail and non-secret metadata.
+/// Connectors → Accounts: validate (optional) and securely store an API key. The plaintext goes to the Vault (an account
+/// that already keeps its key in the OS keychain keeps it there); the DB row keeps only the `SecretRef` pointer, the
+/// masked tail and non-secret metadata.
 /// See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub(super) async fn verify_account_key(
     mstore: Arc<Store>,
@@ -157,18 +158,18 @@ pub(super) async fn verify_account_key(
         // Nothing stored: a structured error keeps the UI in the entry state.
         Err(rejected) => return Ok(rejected),
     };
-    store_secret(&account_id, &req.api_key).await?;
-
     // The existing row, once (replacement path): preserves created_at and any previously stored context.
     let existing = mstore.identity_get(&account_id).ok().flatten();
-    let account = key_account_row(&req, &account_id, existing.as_ref(), probe.status, probe.metadata, &probe.masked_tail);
+    let secret_ref = store_secret(&identity_store, &account_id, &req, existing.as_ref()).await?;
+    let made_here = is_new || existing.as_ref().is_some_and(|a| a.secret_ref != secret_ref);
+    let account = key_account_row(&req, &account_id, existing.as_ref(), secret_ref, probe.status, probe.metadata, &probe.masked_tail);
     if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, &account) {
-        // The DB write failed after the keychain write. A new account has nothing referencing the secret yet,
-        // so it is rolled back rather than orphaned. A replacement keeps it: the existing row still points at
-        // this keychain entry, and deleting it would destroy the previously working credential (the secret is
-        // now the new key, resolution still works, and the user can retry to fix metadata).
-        if is_new {
-            drop_orphaned_secret(&account_id).await;
+        // The DB write failed after the key was stored. A key stored for a new account (or in a new Vault entry)
+        // has nothing referencing it yet, so it is rolled back rather than orphaned. A replacement keeps it: the
+        // existing row still points at that keychain or Vault entry, and deleting it would destroy the previously
+        // working credential (it now holds the new key, resolution still works, and the user can retry).
+        if made_here {
+            drop_orphaned_secret(&identity_store, &account.secret_ref, &account_id).await;
         }
         return Err(format!("account.key.verify: {e}"));
     }
@@ -212,23 +213,38 @@ async fn probe_key(req: &VerifyKeyReq) -> Result<KeyProbe, AccountKeyVerifyResul
     Ok(KeyProbe { status: "valid".to_string(), metadata: outcome.metadata, masked_tail: outcome.masked_tail, valid: true })
 }
 
-/// The plaintext goes to the OS keychain; the DB never sees it. `keyring` is blocking (sync D-Bus on Linux),
-/// so it runs off the async runtime worker.
-async fn store_secret(account_id: &str, api_key: &str) -> Result<(), String> {
-    let (aid, key) = (account_id.to_string(), api_key.to_string());
-    tokio::task::spawn_blocking(move || crate::identity::secret_store::put(&aid, &key))
-        .await
-        .map_err(|e| format!("account.key.verify: keychain task: {e}"))?
-        .map_err(|e| format!("account.key.verify: {e}"))
+/// Where the key is kept: a key added to a new account goes into the Vault, as an `api-key` entry the account row points
+/// at. An account that already keeps its key in the OS keychain keeps it there (a replaced key goes to the same place),
+/// and one whose Vault entry is gone gets a new entry. Both are blocking (the keychain's sync D-Bus on Linux, the
+/// Vault's database), so they run off the async runtime worker. Returns the pointer the row keeps.
+async fn store_secret(identity_store: &Arc<Store>, account_id: &str, req: &VerifyKeyReq, existing: Option<&IdentityAccount>) -> Result<SecretRef, String> {
+    let (vault, aid, key) = (identity_store.clone(), account_id.to_string(), req.api_key.clone());
+    let (provider, name) = (req.provider.clone(), req.name.clone());
+    let current = existing.map(|a| a.secret_ref.clone());
+    tokio::task::spawn_blocking(move || match current {
+        Some(SecretRef::Keychain { service, account }) => {
+            crate::identity::secret_store::put(&aid, &key)?;
+            Ok(SecretRef::Keychain { service, account })
+        }
+        Some(SecretRef::Vault { entry }) if crate::backend::vault::account_key::replace(&vault, &entry, &key).is_ok() => Ok(SecretRef::Vault { entry }),
+        _ => crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key).map(|entry| SecretRef::Vault { entry }),
+    })
+    .await
+    .map_err(|e| format!("account.key.verify: key task: {e}"))?
+    .map_err(|e| format!("account.key.verify: {e}"))
 }
 
-async fn drop_orphaned_secret(account_id: &str) {
-    let aid = account_id.to_string();
-    if let Err(de) = tokio::task::spawn_blocking(move || crate::identity::secret_store::delete(&aid))
-        .await
-        .unwrap_or_else(|je| Err(format!("join: {je}")))
-    {
-        tracing::warn!(target: "identity", "rollback of orphaned keychain secret for {account_id} failed: {de}");
+/// A new account whose row could not be saved leaves nothing behind that points at no account.
+async fn drop_orphaned_secret(identity_store: &Arc<Store>, secret_ref: &SecretRef, account_id: &str) {
+    let (vault, secret_ref, aid) = (identity_store.clone(), secret_ref.clone(), account_id.to_string());
+    let gone = tokio::task::spawn_blocking(move || match &secret_ref {
+        SecretRef::Vault { entry } => crate::backend::vault::account_key::remove(&vault, entry),
+        _ => crate::identity::secret_store::delete(&aid),
+    })
+    .await
+    .unwrap_or_else(|je| Err(format!("join: {je}")));
+    if let Err(de) = gone {
+        tracing::warn!(target: "identity", "rollback of orphaned key for {account_id} failed: {de}");
     }
 }
 
@@ -238,6 +254,7 @@ fn key_account_row(
     req: &VerifyKeyReq,
     account_id: &str,
     existing: Option<&IdentityAccount>,
+    secret_ref: SecretRef,
     status: String,
     metadata: serde_json::Value,
     masked_tail: &str,
@@ -259,10 +276,7 @@ fn key_account_row(
         provider: req.provider.clone(),
         kind: if req.kind.is_empty() { "api_key".to_string() } else { req.kind.clone() },
         display_name: req.display_name.clone(),
-        secret_ref: SecretRef::Keychain {
-            service: crate::identity::secret_store::SERVICE.to_string(),
-            account: crate::identity::secret_store::account_key(account_id),
-        },
+        secret_ref,
         context,
         status,
         created_at,
@@ -295,18 +309,65 @@ mod tests {
         let mut existing = account("acct-1", json!({ "note": "kept", "scopes": "old" }));
         existing.created_at = 42;
         let req = key_req(json!({ "context": { "note": "from the user", "extra": 1 } }));
-        let row = key_account_row(&req, "acct-1", Some(&existing), "valid".to_string(), json!({ "scopes": "from the probe" }), "••••1234");
+        let row = key_account_row(&req, "acct-1", Some(&existing), SecretRef::Vault { entry: "e1".into() }, "valid".to_string(), json!({ "scopes": "from the probe" }), "••••1234");
         assert_eq!(row.context, json!({ "note": "from the user", "extra": 1, "scopes": "from the probe", "masked_tail": "••••1234" }));
         assert_eq!((row.created_at, row.status.as_str(), row.kind.as_str()), (42, "valid", "api_key"));
-        assert!(matches!(row.secret_ref, SecretRef::Keychain { .. }), "the DB keeps a pointer, never the key");
+        assert_eq!(row.secret_ref, SecretRef::Vault { entry: "e1".into() }, "the DB keeps a pointer, never the key");
     }
 
     #[test]
     fn a_new_keys_row_has_its_own_time_and_the_kind_the_caller_gave() {
         let before = agentmux_common::time::now_ms();
-        let row = key_account_row(&key_req(json!({ "kind": "pat", "displayName": "Work" })), "acct-2", None, "unknown".to_string(), json!({}), "tail");
+        let row = key_account_row(&key_req(json!({ "kind": "pat", "displayName": "Work" })), "acct-2", None, SecretRef::Vault { entry: "e2".into() }, "unknown".to_string(), json!({}), "tail");
         assert!(row.created_at >= before && row.created_at == row.updated_at);
         assert_eq!((row.kind.as_str(), row.display_name.as_str(), row.id.as_str()), ("pat", "Work", "acct-2"));
+    }
+
+    fn vault() -> Arc<Store> {
+        crate::backend::vault::seal::use_test_key();
+        let store = Store::open_in_memory().unwrap();
+        store.apply_identity_schema_for_tests().unwrap();
+        Arc::new(store)
+    }
+
+    #[tokio::test]
+    async fn a_key_added_to_a_new_account_is_a_vault_entry_the_account_reads() {
+        let vault = vault();
+        let req = key_req(json!({ "provider": "anthropic", "name": "work" }));
+        let secret_ref = store_secret(&vault, "acct-1", &req, None).await.unwrap();
+        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer, got {secret_ref:?}") };
+        let row = vault.vault_get(entry).unwrap().expect("the entry exists");
+        assert_eq!((row.kind.as_str(), row.label.as_str()), ("api-key", "anthropic account key: work"));
+        let mut account = key_account_row(&req, "acct-1", None, secret_ref.clone(), "valid".into(), json!({}), "tail");
+        account.provider = "anthropic".into();
+        let key = crate::identity::resolver::secret::resolve_account_secret(&account, &vault, &vault).unwrap();
+        assert_eq!(key, "sk-secret-1234");
+        assert!(!serde_json::to_string(&account).unwrap().contains("sk-secret"), "the row never holds the key");
+    }
+
+    #[tokio::test]
+    async fn a_replaced_key_goes_into_the_same_entry_and_a_missing_entry_is_made_again() {
+        let vault = vault();
+        let first = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap();
+        let mut existing = account("acct-1", json!({}));
+        existing.secret_ref = first.clone();
+        let again = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-new-5678" })), Some(&existing)).await.unwrap();
+        assert_eq!(again, first, "the same entry");
+        let SecretRef::Vault { entry } = &first else { panic!("expected a Vault pointer") };
+        assert_eq!(&**crate::backend::vault::account_key::read(&vault, entry).unwrap(), "sk-new-5678");
+        crate::backend::vault::account_key::remove(&vault, entry).unwrap();
+        let remade = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-newer-9012" })), Some(&existing)).await.unwrap();
+        let SecretRef::Vault { entry: made } = &remade else { panic!("expected a Vault pointer") };
+        assert_eq!(&**crate::backend::vault::account_key::read(&vault, made).unwrap(), "sk-newer-9012");
+    }
+
+    #[tokio::test]
+    async fn a_new_accounts_entry_is_removed_when_the_row_could_not_be_saved() {
+        let vault = vault();
+        let secret_ref = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap();
+        drop_orphaned_secret(&vault, &secret_ref, "acct-1").await;
+        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer") };
+        assert!(vault.vault_get(entry).unwrap().is_none());
     }
 
     #[test]

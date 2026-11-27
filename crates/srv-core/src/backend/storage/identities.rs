@@ -112,6 +112,13 @@ pub enum SecretRef {
         /// Keychain account string — `"acct:<account_id>"`.
         account: String,
     },
+    /// **API key kept as an `api-key` entry of the Vault**, addressed by the entry's id. Written when a key is added in
+    /// Connectors > Accounts; the key is sealed in the entry and never held in the DB. Resolved with the Vault store
+    /// (`vault::account_key`); an account made before this holds `Keychain` and still reads from there.
+    Vault {
+        /// The Vault entry's id.
+        entry: String,
+    },
 }
 
 /// An identity account (reusable credential, linked to agents via the

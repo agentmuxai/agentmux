@@ -128,7 +128,8 @@ pub fn cleanup_account_secrets(
             }
         },
         SecretRef::OAuthConfigDir { dir } => cleanup_oauth_dir(acct, Path::new(dir), identities_root),
-        SecretRef::Env { .. } | SecretRef::SecretsManager { .. } | SecretRef::PlaintextDev { .. } => {
+        // The Vault entry is deleted by the caller, which holds the store (`identity_delete`).
+        SecretRef::Env { .. } | SecretRef::SecretsManager { .. } | SecretRef::PlaintextDev { .. } | SecretRef::Vault { .. } => {
             SecretCleanup::NoOp
         }
     }

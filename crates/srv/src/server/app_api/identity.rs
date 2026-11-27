@@ -559,10 +559,13 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
         }
         return Ok(proven(account_id, result));
     }
-    let aid = account_id.to_string();
-    let plaintext = tokio::task::spawn_blocking(move || crate::identity::secret_store::get(&aid))
-        .await.map_err(|e| format!("identity.account.validate: keychain task: {e}"))?
-        .map_err(|e| format!("identity.account.validate: keychain: {e}"))?;
+    let (aid, secret_ref, vault) = (account_id.to_string(), acct.secret_ref.clone(), state.identity_store.clone());
+    let plaintext = tokio::task::spawn_blocking(move || match &secret_ref {
+        crate::backend::storage::identities::SecretRef::Vault { entry } => crate::backend::vault::account_key::read(&vault, entry),
+        _ => crate::identity::secret_store::get(&aid),
+    })
+    .await.map_err(|e| format!("identity.account.validate: key task: {e}"))?
+    .map_err(|e| format!("identity.account.validate: key: {e}"))?;
     let tail = crate::identity::key_validator::masked_tail(&plaintext);
     let outcome = crate::identity::key_validator::validate(&acct.provider, &plaintext).await;
     Ok(proven(account_id, IdentityAccountValidateResult::of(outcome, tail)))

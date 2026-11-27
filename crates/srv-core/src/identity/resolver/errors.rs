@@ -175,6 +175,10 @@ pub enum ResolverError {
     #[error("keychain error: {0}")]
     KeychainError(String),
 
+    /// The Vault entry that holds an account's key could not be read (gone, or sealed with another Vault key).
+    #[error("vault error: {0}")]
+    VaultError(String),
+
     #[error("storage error: {0}")]
     Storage(#[from] StoreError),
 }
