@@ -20,9 +20,8 @@
  *  - puts the focus and the selection back if something took the focus off the field anyway, from the
  *    press on;
  *  - once the pointer has moved `DRAG_SLOP_PX` or more (a drag, not a click), marks the field
- *    `data-text-drag-field` and the root `data-text-drag`, which the kit stylesheet turns into
- *    `pointer-events: none` for everything else: nothing is hovered, nothing receives the release as a
- *    click, and so nothing reacts. A click sets nothing: the root attribute restyles the whole document.
+ *    `data-text-drag-field` and has the field capture the pointer: nothing else is hovered, nothing receives the
+ *    release as a click, and so nothing reacts. A click sets nothing, and nothing in the document is restyled.
  *
  * The engine itself mis-maps a pointer that has left a field whose ancestor carries a CSS transform (the
  * pane tiles do: `translate3d(x, y, 0)`): it reads the pointer's page x as if it were x inside the field, so
@@ -35,7 +34,6 @@
  * button down, the window losing focus or the field leaving the page. Installed once at startup.
  */
 
-const ROOT_ATTR = "data-text-drag";
 const FIELD_ATTR = "data-text-drag-field";
 
 /** Input types that hold text a person selects by dragging. */
@@ -43,6 +41,8 @@ const TEXT_TYPES = new Set(["", "text", "search", "email", "url", "tel", "passwo
 
 /** Fields that are not ours to guard: the terminal's hidden input, and anything marked. */
 const SKIP = ".xterm, [data-text-drag-skip]";
+
+import { beginSelectDrag, endSelectDrag } from "./drag-lag";
 
 /** The text field a press landed on, or null. */
 export function textFieldOf(target: EventTarget | null): HTMLInputElement | HTMLTextAreaElement | null {
@@ -63,6 +63,10 @@ interface Drag {
     y: number;
     /** The attributes are on: the pointer has moved since the press. */
     marked: boolean;
+    /** The pointer the press came from: the field captures it once the drag is marked. */
+    pointerId: number;
+    /** The field's box, read once in the drag (the page does not move under a held press), or null before. */
+    box: DOMRect | null;
     /** The fixed end of the selection, known once the drag is marked. Null for a word or line drag. */
     anchor: number | null;
     /** Where the pointer is now. */
@@ -76,8 +80,8 @@ interface Drag {
 type Field = HTMLInputElement | HTMLTextAreaElement;
 
 /** The caret offset the engine gives for the point (x, y) pulled just inside the field's box, or null. */
-export function caretInField(doc: Document, field: Field, x: number, y: number): number | null {
-    const r = field.getBoundingClientRect();
+export function caretInField(doc: Document, field: Field, x: number, y: number, box?: DOMRect): number | null {
+    const r = box ?? field.getBoundingClientRect();
     if (r.width < 3 || r.height < 3) return null;
     const probe = (doc as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null })
         .caretPositionFromPoint;
@@ -86,10 +90,10 @@ export function caretInField(doc: Document, field: Field, x: number, y: number):
 }
 
 /** The selection the pointer at (x, y) means, from `anchor`, while the pointer is outside the field's box. */
-function selectionToward(doc: Document, field: Field, anchor: number, x: number, y: number) {
-    const r = field.getBoundingClientRect();
+function selectionToward(doc: Document, field: Field, anchor: number, x: number, y: number, box?: DOMRect) {
+    const r = box ?? field.getBoundingClientRect();
     if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return null;
-    const at = caretInField(doc, field, x, y);
+    const at = caretInField(doc, field, x, y, r);
     if (at === null) return null;
     return { start: Math.min(anchor, at), end: Math.max(anchor, at), dir: at < anchor ? ("backward" as const) : ("forward" as const) };
 }
@@ -99,17 +103,24 @@ function anchorOf(field: Field): number {
     return (field.selectionDirection === "backward" ? field.selectionEnd : field.selectionStart) ?? 0;
 }
 
-// The attributes go on at the first move, not at the press. `html[data-text-drag] *` restyles the
-// whole document (5,000-plus elements, about 45 ms on a six-pane layout), and setting it at the
+// The attributes go on at the first move, not at the press. The old root attribute restyled the
+// whole document (5,000-plus elements, about 45 ms on a six-pane layout; 200 to 300 ms on long transcripts), and setting it at the
 // press and clearing it at the release did that twice for every click into a composer, which is why
 // clicking into an input box lagged where clicking a pane's body did not (#45977). A click never
 // moves; nothing else is under the pointer until it leaves the field, and the `dragstart` stop and
 // the focus restore work from the press alone.
 function markDrag(doc: Document, d: Drag): void {
     d.marked = true;
+    beginSelectDrag();
     d.anchor = anchorOf(d.field);
     d.field.setAttribute(FIELD_ATTR, "");
-    doc.documentElement.setAttribute(ROOT_ATTR, "");
+    // The field keeps the pointer: nothing else is hovered and the release lands on the field, not on a pane or row, with no
+    // rule that restyles the page (the old root attribute restyled all of it at this first move).
+    try {
+        d.field.setPointerCapture(d.pointerId);
+    } catch {
+        // A pointer that has already gone (a release raced the move): nothing to hold.
+    }
 }
 
 function restoreFocus(d: Drag): void {
@@ -130,7 +141,9 @@ function restoreFocus(d: Drag): void {
  */
 function followPointer(doc: Document, d: Drag): void {
     if (!d.marked || d.anchor === null || d.multi || !d.field.isConnected) return;
-    const sel = selectionToward(doc, d.field, d.anchor, d.at.x, d.at.y);
+    // The box is read once for the drag, on the first move that needs it: a read on every move laid out a page the drag had just restyled.
+    d.box ??= d.field.getBoundingClientRect();
+    const sel = selectionToward(doc, d.field, d.anchor, d.at.x, d.at.y, d.box);
     const f = d.field;
     if (!sel || (f.selectionStart === sel.start && f.selectionEnd === sel.end && f.selectionDirection === sel.dir)) return;
     try {
@@ -147,8 +160,9 @@ export function installTextDragGuard(win: Window = window): () => void {
     const end = (): void => {
         if (!drag) return;
         if (drag.marked) {
+            endSelectDrag();
             drag.field.removeAttribute(FIELD_ATTR);
-            doc.documentElement.removeAttribute(ROOT_ATTR);
+            if (drag.field.hasPointerCapture?.(drag.pointerId)) drag.field.releasePointerCapture(drag.pointerId);
         }
         drag = null;
     };
@@ -159,7 +173,7 @@ export function installTextDragGuard(win: Window = window): () => void {
         if (p.button !== 0 || (p.pointerType && p.pointerType !== "mouse" && p.pointerType !== "pen")) return;
         const field = textFieldOf(p.target);
         if (!field) return;
-        drag = { field, x: p.clientX, y: p.clientY, marked: false, anchor: null, at: { x: p.clientX, y: p.clientY }, multi: false, lost: null };
+        drag = { field, x: p.clientX, y: p.clientY, marked: false, pointerId: p.pointerId, box: null, anchor: null, at: { x: p.clientX, y: p.clientY }, multi: false, lost: null };
     };
 
     // A double or triple click selects by word or line: the engine keeps that granularity, so leave it be.

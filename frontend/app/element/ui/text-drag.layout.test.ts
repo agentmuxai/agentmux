@@ -20,11 +20,11 @@ import { driveInBrowser, type DrivenPage } from "@/app/view/agent/components/lay
 
 const BROWSER = findBrowser();
 // The guard's own source, compiled to a script that leaves its exports on `TD`.
-const GUARD = `var TD = {}; (function (exports) {${
-    ts.transpileModule(readFileSync(join(__dirname, "text-drag.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
-}})(TD);`;
+const compile = (file: string) =>
+    ts.transpileModule(readFileSync(join(__dirname, file), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const GUARD = `var OUT = {}; (function (exports) {${compile("drag-lag.ts")}})(OUT); var TD = {}; (function (exports, require) {${compile("text-drag.ts")}})(TD, function () { return OUT; });`;
 // The stylesheet rules the guard turns its marker into: the real ones, not a copy.
-const RULES = (readFileSync(join(__dirname, "../../app.scss"), "utf8").match(/html\[data-text-drag\][^{]*\{[^}]*\}/g) ?? []).join("\n");
+const RULES = "";
 
 interface Case {
     kind: "textarea" | "input";
@@ -52,8 +52,8 @@ function fixture(c: Case, moved: "transform" | "margin"): string {
 type Sel = [number, number, string];
 interface Run {
     steps: Record<string, Sel>;
-    /** Whether the slot was under the pointer, at the far left of the field, with the drag marked. */
-    slotHit: boolean;
+    /** Pointer and mouse events during the drag that reached the pane's slot itself (not the field): a hover, a click. */
+    slotEvents: number;
 }
 
 /** Press in the field's first line, drag out left, right, above and below, then out of the window, and release. */
@@ -72,6 +72,7 @@ async function drag(p: DrivenPage): Promise<Run> {
     let at = { x: r.left + (r.right - r.left) * 0.7, y: line };
     await p.mouse("mouseMoved", at.x, line);
     await p.mouse("mousePressed", at.x, line);
+    await p.eval(`(() => { window.__slotEvents = 0; for (const t of ["pointerover", "pointerenter", "mouseover", "mouseenter", "pointermove", "mousemove", "pointerup", "mouseup", "click"]) document.addEventListener(t, (e) => { const f = document.getElementById("f"); if (e.target !== f && document.getElementById("slot").contains(e.target)) window.__slotEvents++; }, true); })()`);
     const to = async (x: number, y: number): Promise<void> => {
         for (let i = 1; i <= 6; i++) {
             await p.mouse("mouseMoved", at.x + ((x - at.x) * i) / 6, at.y + ((y - at.y) * i) / 6);
@@ -87,7 +88,6 @@ async function drag(p: DrivenPage): Promise<Run> {
     steps.inside = await sel();
     await to(left, line);
     steps.left = await sel();
-    const slotHit = await p.eval<boolean>(`(() => { const e = document.elementFromPoint(${left}, ${line}); return !!e && document.getElementById("slot").contains(e); })()`);
     await to(r.right + 60, line);
     steps.right = await sel();
     await to(mid, r.top - 15);
@@ -103,7 +103,7 @@ async function drag(p: DrivenPage): Promise<Run> {
     await p.mouse("mouseReleased", at.x, at.y);
     await new Promise((res) => setTimeout(res, 100));
     steps.released = await sel();
-    return { steps, slotHit };
+    return { steps, slotEvents: await p.eval<number>(`window.__slotEvents`) };
 }
 
 const SIZE = { width: 1000, height: 600 };
@@ -125,8 +125,8 @@ describe.skipIf(!BROWSER)("a selection drag out of a text field", () => {
             // just follows the pointer, with or without a transform): with no oracle there, the case needs a full Chrome.
             if (c.kind === "input" && control.steps.inside[0] === control.steps.inside[1]) ctx.skip();
             expect(moved.steps).toEqual(control.steps);
-            // The pane's slot sets `pointer-events: auto` inline: during the drag nothing in the pane is under the pointer.
-            expect(moved.slotHit).toBe(false);
+            // The pane's slot sets `pointer-events: auto` inline: during the drag nothing in the pane but the field gets the pointer.
+            expect(moved.slotEvents).toBe(0);
         }, 120_000);
     }
 });

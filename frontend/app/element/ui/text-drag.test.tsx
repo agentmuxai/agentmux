@@ -24,7 +24,7 @@ function drag(target: Element): void {
     pointer("pointermove", 1, target);
 }
 
-const dragging = () => document.documentElement.hasAttribute("data-text-drag");
+const dragging = () => document.querySelector("[data-text-drag-field]") !== null;
 
 beforeEach(() => {
     document.body.innerHTML = "";
@@ -43,6 +43,22 @@ function mount(html: string): HTMLElement {
     return root;
 }
 
+describe("the drag's lag line", () => {
+    it("logs one [perf] select-drag line, at the release, for a drag that moved", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const root = mount('<input id="f" value="hello world">');
+        const f = root.querySelector("input")!;
+        press(f);
+        for (let i = 0; i < 8; i++) pointer("pointermove", 1, f, 40 + i * 5);
+        expect(warn).not.toHaveBeenCalled();
+        pointer("pointerup", 0, f, 80);
+        const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[perf] select-drag"));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatch(/^\[perf\] select-drag moves=\d+ frames-drawn=\d+ lag p50=\d+ms/);
+        warn.mockRestore();
+    });
+});
+
 describe("the text drag guard", () => {
     it("marks the page and the field once a press in a text field moves, and clears both on release", () => {
         const root = mount('<input id="f" value="hello world">');
@@ -56,7 +72,7 @@ describe("the text drag guard", () => {
     });
 
     it("marks nothing for a click: a press and release that does not move, or moves less than the slop", () => {
-        // `html[data-text-drag] *` restyles the whole document, so a click into a composer must not toggle it (#45977).
+        // The attributes restyle most of the document, so a click into a composer must not toggle them (#45977).
         const root = mount('<input id="f" value="hello world">');
         const f = root.querySelector("input")!;
         const html = document.documentElement;

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { debounce } from "throttle-debounce";
-import { beginBorderDrag, endBorderDrag } from "./border-drag-lag";
+import { beginBorderDrag, endBorderDrag } from "@/app/element/ui/drag-lag";
 import { findNode } from "./layoutNode";
 import { isEffectivelyMinimized } from "./layoutMinimize";
 import {

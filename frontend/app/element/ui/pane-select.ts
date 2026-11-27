@@ -28,9 +28,12 @@
  * field. Installed once at startup.
  */
 
+import { beginSelectDrag, endSelectDrag } from "./drag-lag";
+import { outsideRoots, stageAttribute } from "./outside";
 import "./pane-select.scss";
 
-export const ROOT_ATTR = "data-pane-select";
+/** On every root of what is outside the pane a press began in, while the button is held (outside.ts): the stylesheet makes it unselectable. */
+export const OFF_ATTR = "data-pane-select-off";
 export const OWNER_ATTR = "data-pane-select-owner";
 
 /** How far the pointer moves, in CSS px, before a press counts as a drag. */
@@ -74,6 +77,10 @@ interface Drag {
     y: number;
     /** The attributes are on: the pointer has moved since the press. */
     marked: boolean;
+    /** The roots of everything outside the pane, once marked. */
+    off: Element[];
+    /** The drag's lag is being timed (`[perf] select-drag`): the pointer has moved past the slop. */
+    timed: boolean;
     /** The pointer is over the pane (not over another pane, the chrome or the gap between). */
     inside: boolean;
     /** The selection as it stood the last time it changed with the pointer over the pane. */
@@ -103,6 +110,21 @@ export function cannotSelect(win: Window, el: Element | null): boolean {
     return !!el && win.getComputedStyle(el).userSelect === "none";
 }
 
+/** The pointer is over something other than the pane: the pane owns the selection, and everything outside it is switched off. */
+function markPane(d: Drag): void {
+    d.marked = true;
+    d.pane.setAttribute(OWNER_ATTR, "");
+    d.off = outsideRoots(d.pane);
+    stageAttribute(d.off, OFF_ATTR, true);
+}
+
+/** The first move past the slop: starts timing the drag's lag (`[perf] select-drag`). */
+function timeOnce(d: Drag, far: boolean): void {
+    if (!far || d.timed) return;
+    d.timed = true;
+    beginSelectDrag();
+}
+
 export function installPaneSelectGuard(win: Window = window): () => void {
     const doc = win.document;
     const mac = isMacPlatform(win);
@@ -110,17 +132,12 @@ export function installPaneSelectGuard(win: Window = window): () => void {
 
     const end = (): void => {
         if (!drag) return;
+        if (drag.timed) endSelectDrag();
         if (drag.marked) {
             drag.pane.removeAttribute(OWNER_ATTR);
-            doc.documentElement.removeAttribute(ROOT_ATTR);
+            stageAttribute(drag.off, OFF_ATTR, false);
         }
         drag = null;
-    };
-
-    const mark = (d: Drag): void => {
-        d.marked = true;
-        d.pane.setAttribute(OWNER_ATTR, "");
-        doc.documentElement.setAttribute(ROOT_ATTR, "");
     };
 
     /** Shift+click extends the selection from where it began to the click: never from one pane into another. */
@@ -141,7 +158,7 @@ export function installPaneSelectGuard(win: Window = window): () => void {
         // A press on something that says `user-select: none` (the Atlas map, a button, a header) cannot start a
         // selection, so there is nothing to confine, and marking it restyles every element of the window.
         if (cannotSelect(win, elementOf(p.target))) return;
-        drag = { pane, x: p.clientX, y: p.clientY, marked: false, inside: true, last: null };
+        drag = { pane, x: p.clientX, y: p.clientY, marked: false, off: [], timed: false, inside: true, last: null };
     };
 
     const onMove = (e: Event): void => {
@@ -154,7 +171,9 @@ export function installPaneSelectGuard(win: Window = window): () => void {
         }
         drag.inside = paneOf(p.target) === drag.pane;
         // Only a pointer outside the pane can reach another pane; marking restyles the whole window.
-        if (!drag.marked && !drag.inside && Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX) mark(drag);
+        const far = Math.hypot(p.clientX - drag.x, p.clientY - drag.y) >= DRAG_SLOP_PX;
+        timeOnce(drag, far);
+        if (!drag.marked && !drag.inside && far) markPane(drag);
     };
 
     /** A selection that began in a pane and whose far end has left it: the end goes back to the pane's edge. */

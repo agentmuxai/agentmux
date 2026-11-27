@@ -22,9 +22,10 @@ import { driveInBrowser, type DrivenPage } from "@/app/view/agent/components/lay
 
 const BROWSER = findBrowser();
 // The guard's own source, compiled to a script that leaves its exports on `PS` (its stylesheet import is the rules below).
-const GUARD = `var PS = {}; (function (exports) {${ts
-    .transpileModule(readFileSync(join(__dirname, "pane-select.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } })
-    .outputText.replace(/require\("\.\/pane-select\.scss"\);?/g, "")}})(PS);`;
+const compile = (file: string) =>
+    ts.transpileModule(readFileSync(join(__dirname, file), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+// `outside.ts`, which the guard imports, goes in first and answers its `require`.
+const GUARD = `var OUT = {}; (function (exports) {${compile("outside.ts")}})(OUT); (function (exports) {${compile("drag-lag.ts")}})(OUT); var PS = {}; (function (exports, require) {${compile("pane-select.ts").replace('require("./pane-select.scss");', "")}})(PS, function () { return OUT; });`;
 // The stylesheet's rules, as it is written (SCSS here is plain CSS with line comments).
 const RULES = readFileSync(join(__dirname, "pane-select.scss"), "utf8").replace(/^\s*\/\/.*$/gm, "");
 
@@ -78,7 +79,7 @@ const PROBE = `(() => {
         len: String(s).length,
         inA: rs.every((r) => where(r.startContainer) === "a" && where(r.endContainer) === "a"),
         crossing: rs.some((r) => where(r.startContainer) !== where(r.endContainer)),
-        locked: document.documentElement.hasAttribute("data-pane-select"),
+        locked: document.querySelector("[data-pane-select-off]") !== null,
     };
 })()`;
 
