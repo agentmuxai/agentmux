@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.60.44 — 2026-11-27
+
+- Selecting text no longer stalls the first move of a drag: the selection guards stop restyling the whole page (the field keeps the pointer by capture, the rest of a pane drag is switched off a few roots at a time), and each drag logs its lag (#48733)
+- Back and Forward now follow the whole trail: a link that opens the Kanban on a task, and a card opened or closed in it, are steps of the window's history, so the mouse side buttons walk back through them in reverse, with the card put back
+- Connectors: the Anthropic API key form no longer asks for the provider, the kind or a default model
+- Model gateway: every refused request and every ended token is written to the log, with its reason, agent and account
+- Connectors: an API key added with Save and validate is kept as an api-key entry in the Vault, and the account row holds only its id; accounts that keep their key in the OS keychain are unchanged
+- Log gateway tokens ended by renewal without exposing token values
+- Keep normalized non-GitHub repository keys stable
+- Dragging a pane border logs how far behind its frame each pane's content was (a [perf] border-content line); measure only
+- Keep older Vault agent changes visible after entry and seen filters
+- Windows: when AgentMux restarts a frozen background service, it first saves a small diagnostic dump of it so the cause of the freeze can be found
+
 ## 0.60.43 — 2026-11-26
 
 - Desktop: a minimised window is restored, the foreground is taken more reliably, each look has a number and scale, look can zoom a region, and actions can return the fresh look
