@@ -55,6 +55,60 @@ fn respawn_splash_for_restart(dir_hash: &str, seq: u32, sink: &startup_events::S
     crate::splash::spawn_splash(&unique_id, rx, true)
 }
 
+/// Take a minidump of a wedged srv, log the "srv wedged" line with what came of it, and kill srv.
+/// The dump comes first because it is the only moment a wedged srv's stacks can be read; it costs at
+/// most `WEDGE_DUMP_BUDGET`. Killing srv directly (not through J0, which is scoped to a whole-tree
+/// teardown) makes the `srv_child.wait()` arm run the existing respawn/rebind/host-recycle path.
+async fn kill_wedged_srv(
+    srv_child: &mut tokio::process::Child,
+    dir_hash: &str,
+    reason: crate::srv_liveness::RecycleReason,
+    misses: u32,
+) {
+    // The handle copy is taken here, before the kill, and closed by the dump on every path.
+    let dump = srv_wedge_dump(
+        srv_child.id(),
+        srv_child.raw_handle().and_then(crate::host_hang_dump::copy_handle),
+        crate::host_hang_dump::srv_wedge_prefix(dir_hash),
+    );
+    crate::srv_liveness::dump_then_kill(dump, crate::srv_liveness::WEDGE_DUMP_BUDGET, |dump_note| {
+        log(&format!(
+            "[srv-liveness] srv wedged ({reason:?}: unresponsive to {misses} consecutive health \
+             probes; {dump_note}) — forcing recycle"
+        ));
+        let _ = srv_child.start_kill();
+    })
+    .await;
+}
+
+/// A minidump of a wedged srv into `C:\CrashDumps\agentmuxsrv`, and its size. Takes ownership of
+/// `handle` (a copy of the one `CreateProcess` gave the launcher; srv refuses other openers) and closes it
+/// on every path. Dropping the future early (the caller's time budget) leaves the write to finish.
+async fn srv_wedge_dump(
+    pid: Option<u32>,
+    handle: Option<usize>,
+    prefix: Option<String>,
+) -> Result<(std::path::PathBuf, u64), String> {
+    let (Some(pid), Some(prefix)) = (pid, prefix) else {
+        if let Some(h) = handle {
+            crate::host_hang_dump::close_copy(h);
+        }
+        return Err("srv pid or instance key unusable".to_string());
+    };
+    let written = tokio::task::spawn_blocking(move || {
+        let dir = std::path::Path::new(crate::host_hang_dump::SRV_WEDGE_DIR);
+        let out = crate::host_hang_dump::write_srv_wedge_dump(pid, handle, dir, &prefix);
+        if let Some(h) = handle {
+            crate::host_hang_dump::close_copy(h);
+        }
+        out
+    })
+    .await
+    .map_err(|e| format!("dump task: {e}"))??;
+    let bytes = std::fs::metadata(&written).map(|m| m.len()).unwrap_or(0);
+    Ok((written, bytes))
+}
+
 /// Windows main flow: resolve paths → create J0 → spawn srv → spawn
 /// host with srv endpoints in env → supervised wait → cleanup.
 #[cfg(target_os = "windows")]
@@ -858,50 +912,8 @@ pub(crate) async fn run_windows(
                         if let Some(reason) = decision {
                             let misses = srv_recycle.misses();
                             srv_recycle = crate::srv_liveness::RecyclePolicy::default();
-                            // The dump comes first: it is a wedged srv's only readable
-                            // stacks, and the kill ends them. It costs at most
-                            // WEDGE_DUMP_BUDGET (a snapshot of the process is quick; the
-                            // file is written from the snapshot).
-                            let dump_pid = srv_child.id();
-                            let dump_handle = srv_child.raw_handle().and_then(crate::host_hang_dump::copy_handle);
-                            let dump_prefix = crate::host_hang_dump::srv_wedge_prefix(&dir_hash);
-                            let dump = async move {
-                                let (Some(pid), Some(prefix)) = (dump_pid, dump_prefix.as_ref().cloned()) else {
-                                    if let Some(h) = dump_handle {
-                                        crate::host_hang_dump::close_copy(h);
-                                    }
-                                    return Err(format!("srv pid {dump_pid:?}, instance key usable: {}", dump_prefix.is_some()));
-                                };
-                                let written = tokio::task::spawn_blocking(move || {
-                                    let dir = std::path::Path::new(crate::host_hang_dump::SRV_WEDGE_DIR);
-                                    let out = crate::host_hang_dump::write_srv_wedge_dump(pid, dump_handle, dir, &prefix);
-                                    if let Some(h) = dump_handle {
-                                        crate::host_hang_dump::close_copy(h);
-                                    }
-                                    out
-                                })
-                                .await
-                                .map_err(|e| format!("dump task: {e}"))??;
-                                let bytes = std::fs::metadata(&written).map(|m| m.len()).unwrap_or(0);
-                                Ok((written, bytes))
-                            };
-                            crate::srv_liveness::dump_then_kill(dump, crate::srv_liveness::WEDGE_DUMP_BUDGET, |dump_note| {
-                                log(&format!(
-                                    "[srv-liveness] srv wedged ({:?}: unresponsive to {} consecutive health \
-                                     probes; {}) — forcing recycle",
-                                    reason, misses, dump_note
-                                ));
-                                // Kill srv directly (not via J0/TerminateJobObject —
-                                // this is scoped to srv alone, not a whole-tree
-                                // teardown). The srv_status = srv_child.wait() arm
-                                // (next iteration) picks up the exit and runs the
-                                // already-shipped #2107 respawn/rebind/host-recycle
-                                // path unmodified — this arm's only job is deciding
-                                // "treat this as a crash".
-                                srv_killed_wedged = true;
-                                let _ = srv_child.start_kill();
-                            })
-                            .await;
+                            srv_killed_wedged = true;
+                            kill_wedged_srv(&mut srv_child, &dir_hash, reason, misses).await;
                         }
                     }
                 }
