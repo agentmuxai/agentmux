@@ -98,6 +98,8 @@ pub fn renew_for_account(agent: &str, def_id: &str, route: &str, account: &str, 
             return old;
         }
         reg.by_agent.remove(&key);
+        let account = reg.by_digest.get(&digest(&old)).map(|grant| grant.account.clone()).unwrap_or_default();
+        tracing::info!(def_id = %key.0, route = %key.1, account = %account, "model gateway: a token was ended");
         reg.by_digest.remove(&digest(&old));
         reg.minted.remove(&digest(&old));
         // Only the latest replaced token is kept for this agent and route: the ones before it are not asked for again.
@@ -189,6 +191,56 @@ fn end_token(reg: &mut Registry, key: &(String, String)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacing_and_revoking_tokens_logs_the_ended_grant_without_secrets() {
+        #[derive(Clone, Default)]
+        struct Capture(std::sync::Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Capture {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for Capture {
+            type Writer = Capture;
+            fn make_writer(&'writer self) -> Capture {
+                self.clone()
+            }
+        }
+        let output = Capture::default();
+        let subscriber = tracing_subscriber::fmt().json().with_writer(output.clone()).with_max_level(tracing::Level::INFO).finish();
+        let (old, renewed) = tracing::subscriber::with_default(subscriber, || {
+            let old = renew_for_account("log-agent", "log-def", "anthropic", "old-account", None);
+            assert_eq!(renew_for_account("log-agent", "log-def", "anthropic", "old-account", None), old);
+            assert!(output.0.lock().unwrap().is_empty(), "minting and reusing do not end a token");
+            let renewed = renew_for_account("log-agent", "log-def", "anthropic", "new-account", None);
+            assert_ne!(renewed, old);
+            assert_eq!(grant_for(&old), None);
+            assert_eq!(current_grant_of_replaced(&old), grant_for(&renewed));
+            assert_eq!(grant_for(&renewed).unwrap().account, "new-account");
+            revoke("log-def", "anthropic");
+            assert_eq!(current_grant_of_replaced(&old), None);
+            (old, renewed)
+        });
+        let text = String::from_utf8(output.0.lock().unwrap().clone()).unwrap();
+        assert!(!text.contains(&old) && !text.contains(&renewed));
+        assert!(!text.contains(TOKEN_PREFIX));
+        let events: Vec<serde_json::Value> = text.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(events.len(), 2, "{text}");
+        for (event, account) in events.iter().zip(["old-account", "new-account"]) {
+            assert_eq!(event["level"], "INFO");
+            assert_eq!(event["fields"], serde_json::json!({
+                "message": "model gateway: a token was ended",
+                "def_id": "log-def",
+                "route": "anthropic",
+                "account": account,
+            }));
+        }
+    }
 
     #[test]
     fn a_token_is_reused_per_agent_and_route_and_can_be_revoked() {
