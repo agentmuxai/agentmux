@@ -174,6 +174,9 @@ pub(super) async fn verify_account_key(
         return Err(format!("account.key.verify: {e}"));
     }
     broker.publish_event::<crate::backend::mps_events::IdentityAccountsChanged>(&(), vec![], 0);
+    if matches!(account.secret_ref, SecretRef::Vault { .. }) {
+        crate::server::vault_handlers::publish_change(&broker);
+    }
     // A key the provider just accepted proves the account works (#2237).
     if probe.valid {
         crate::server::account_episodes::after_sign_in(&account_id);

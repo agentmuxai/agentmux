@@ -81,14 +81,19 @@ fn shape_error(what: &str) -> String {
 
 /// Tells every UI the Vault or its requests changed. Carries no entry.
 pub(crate) fn publish(state: &AppState) {
+    publish_change(&state.broker);
+    // A sign-in page already open lists what the Vault holds now.
+    super::browser_signin_fill::refresh_all(state);
+}
+
+/// [`publish`] without the sign-in pages: for a change to an entry no sign-in page lists (an account's key).
+pub(crate) fn publish_change(broker: &crate::backend::mps::Broker) {
     let event = crate::backend::mps_events::VaultEvent {
         requests: requests::requests().list(),
         uses: crate::backend::vault::uses::uses().list(),
         changed_ms: agentmux_common::time::now_ms_u64(),
     };
-    state.broker.publish_event::<crate::backend::mps_events::Vault>(&event, vec![], 0);
-    // A sign-in page already open lists what the Vault holds now.
-    super::browser_signin_fill::refresh_all(state);
+    broker.publish_event::<crate::backend::mps_events::Vault>(&event, vec![], 0);
 }
 
 /// What AgentMux already keeps in the keychain, managed elsewhere: named,

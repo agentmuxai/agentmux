@@ -39,6 +39,9 @@ pub(crate) async fn delete_identity_account(
         });
     }
     let cleanup_report = remove_secrets(acct.clone(), identity_store).await;
+    if acct.as_ref().is_some_and(|a| matches!(a.secret_ref, SecretRef::Vault { .. })) {
+        crate::server::vault_handlers::publish_change(broker);
+    }
     let outcome = mstore
         .identity_delete(id)
         .map_err(|e| format!("deleteidentityaccount: {e}"))?;
