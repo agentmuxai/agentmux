@@ -71,6 +71,48 @@ fn an_entry_an_agent_added_is_listed_unseen_and_seen_clears_it_and_the_mark_on_i
 }
 
 #[test]
+fn entry_and_seen_filters_precede_the_limit_without_losing_undo_history() {
+    let store = store();
+    let entry = key(&store, "Earlier", "original-value");
+    capture_over(&store, &entry, "builder", "middle-value");
+    let first = agent_changes::list(&store, Some(&entry), false).unwrap()[0].seq;
+    store.vault_changes_seen_all(first).unwrap();
+    capture_over(&store, &entry, "builder", "latest-value");
+    update_details_for(&store, &asked(&entry, Some("Earlier renamed"), &[]), "builder", Some(OWN)).unwrap();
+    let other = key(&store, "Other", "other-value");
+    for _ in 0..301 {
+        record_line(&store, Line { entry_id: &other, label: "Other", actor: "agent:builder", action: inspect::CHANGED_DETAILS, target: "label", outcome: "done", reason: REASON });
+    }
+
+    let capped = agent_changes::list(&store, None, false).unwrap();
+    assert_eq!(capped.len(), 300);
+    assert!(capped.iter().all(|change| change.entry_id == other));
+    let history = agent_changes::list(&store, Some(&entry), true).unwrap();
+    assert_eq!(history.len(), 3, "an entry's history is not crowded out by other entries");
+    assert!(history.iter().find(|change| change.seq == first).unwrap().seen);
+    let value = history.iter().find(|change| change.kind == "new value" && change.seq != first).unwrap();
+    let details = history.iter().find(|change| change.kind == "changed details").unwrap();
+    assert_eq!(value.undo, "restore value");
+    assert_eq!(details.undo, "restore details");
+
+    for row in store.vault_activity_agent_changes(0, &[inspect::CHANGED_DETAILS], Some(&other), true, -1).unwrap() {
+        store.vault_change_seen(row.seq).unwrap();
+    }
+    let unseen = agent_changes::list(&store, None, false).unwrap();
+    assert_eq!(unseen.len(), 2, "newer seen lines must not hide older unseen changes");
+    assert!(unseen.iter().all(|change| change.entry_id == entry && !change.seen));
+    assert!(unseen.iter().any(|change| change.seq == value.seq && change.undo == "restore value"));
+    assert_eq!(agent_changes::list(&store, Some(&other), true).unwrap().len(), 300);
+    assert!(agent_changes::list(&store, Some(&other), false).unwrap().is_empty());
+
+    agent_changes::undo(&store, value.seq).unwrap();
+    assert_eq!(reveal(&store, &entry, "value", "revealed").unwrap().as_str(), "middle-value", "seen lines still own their earlier values");
+    agent_changes::undo(&store, details.seq).unwrap();
+    assert_eq!(store.vault_get(&entry).unwrap().unwrap().label, "Earlier");
+    assert!(agent_changes::list(&store, Some(&entry), false).unwrap().is_empty());
+}
+
+#[test]
 fn undo_of_an_added_entry_removes_it_as_the_persons_own_action() {
     let s = store();
     let id = generated_login(&s);
@@ -254,7 +296,7 @@ fn only_a_creating_line_written_with_the_entry_makes_it_added_and_offers_removal
     let id = key(&s, "Synced", "sk_synced_00000");
     capture_over(&s, &id, "builder", "sk_agents_00001");
     let row = s.vault_get(&id).unwrap().unwrap();
-    let line = s.vault_activity_agent_changes(0, &["captured"], 10).unwrap().remove(0);
+    let line = s.vault_activity_agent_changes(0, &["captured"], None, true, 10).unwrap().remove(0);
     // An entry with no local creation line (from sync or a bulk import) has an edit like this one for its first line.
     let long_before = VaultRow { created_at: line.at - 60_000, ..row.clone() };
     assert!(!inspect::is_creation(&line, &long_before), "a capture long after the entry was made is an edit, not its creation");

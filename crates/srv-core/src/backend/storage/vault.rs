@@ -696,15 +696,23 @@ impl Store {
     }
 
     /// The lines agents wrote that are changes to look at (`actions`), from `since_ms` on, newest first.
-    pub fn vault_activity_agent_changes(&self, since_ms: i64, actions: &[&str], limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
+    pub fn vault_activity_agent_changes(&self, since_ms: i64, actions: &[&str], entry: Option<&str>, include_seen: bool, limit: i64) -> Result<Vec<VaultActivityRow>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let marks = vec!["?"; actions.len()].join(", ");
-        let mut stmt = conn.prepare(&format!(
-            "SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE actor_kind = 'agent' AND at >= ? AND action IN ({marks}) AND (outcome = 'done' OR outcome = 'waiting for the person') AND entry_id != '' ORDER BY seq DESC LIMIT ?"
-        ))?;
         let mut args: Vec<rusqlite::types::Value> = vec![since_ms.into()];
         args.extend(actions.iter().map(|a| rusqlite::types::Value::from(a.to_string())));
+        let mut filters = String::new();
+        if let Some(entry) = entry {
+            filters.push_str(" AND entry_id = ?");
+            args.push(entry.to_string().into());
+        }
+        if !include_seen {
+            filters.push_str(" AND seq > COALESCE((SELECT through_seq FROM db_vault_changes_seen_all WHERE id = 1), 0) AND NOT EXISTS (SELECT 1 FROM db_vault_changes_seen WHERE db_vault_changes_seen.seq = db_vault_activity.seq)");
+        }
         args.push(limit.into());
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {ACTIVITY_COLUMNS} FROM db_vault_activity WHERE actor_kind = 'agent' AND at >= ? AND action IN ({marks}) AND (outcome = 'done' OR outcome = 'waiting for the person') AND entry_id != ''{filters} ORDER BY seq DESC LIMIT ?"
+        ))?;
         let rows = stmt.query_map(rusqlite::params_from_iter(args), activity_of)?;
         Ok(rows.collect::<Result<_, _>>()?)
     }
