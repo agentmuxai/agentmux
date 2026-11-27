@@ -5,6 +5,7 @@
 
 pub mod append;
 pub mod attribution;
+pub mod compact;
 pub mod counting;
 pub mod damage;
 pub mod framer;
