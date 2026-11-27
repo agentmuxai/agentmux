@@ -171,9 +171,39 @@ describe("AccountForm: opening", () => {
     });
 
     it("takes provider and kind from an Add preset", () => {
-        renderForm({ preset: { provider: "openai", kind: "api_key" } });
-        expect(selectOf("Provider").value).toBe("openai");
-        expect(selectOf("Kind").value).toBe("api_key");
+        renderForm({ preset: { provider: "aws", kind: "role" } });
+        expect(selectOf("Provider").value).toBe("aws");
+        expect(selectOf("Kind").value).toBe("role");
+    });
+
+    it("does not ask for the provider or the kind of an API key it was opened for, nor for a default model", () => {
+        for (const provider of ["anthropic", "openai", "agentmux"] as const) {
+            renderForm({ preset: { provider, kind: "api_key" } });
+            expect(hasField("Provider")).toBe(false);
+            expect(hasField("Kind")).toBe(false);
+            expect(hasField("Default model")).toBe(false);
+            expect(hasField("Name *")).toBe(true);
+            expect(hasField("Display name")).toBe(true);
+            expect(hasField("Secret backend")).toBe(true);
+            cleanup();
+        }
+    });
+
+    it("keeps the provider and kind out of an edit of an API key account too, and its default model as it was", () => {
+        const { updateAccount } = renderForm({
+            editing: makeAccount({ provider: "anthropic", kind: "api_key", secret_ref: { backend: "env", env_var: "KEY" }, context: { anthropic_model: "claude-sonnet-4-6" } }),
+        });
+        expect(hasField("Provider")).toBe(false);
+        expect(hasField("Kind")).toBe(false);
+        expect(hasField("Default model")).toBe(false);
+        fireEvent.click(button("Save"));
+        expect(updateAccount.mock.calls[0][1]).toMatchObject({ provider: "anthropic", kind: "api_key", context: { anthropic_model: "claude-sonnet-4-6" } });
+    });
+
+    it("still asks for the provider and the kind where they are not settled by the choice", () => {
+        renderForm({ preset: { provider: "custom", kind: "api_key" } });
+        expect(hasField("Provider")).toBe(true);
+        expect(hasField("Kind")).toBe(true);
     });
 
     it("prefers the account being edited over a preset", () => {
@@ -262,7 +292,7 @@ describe("AccountForm: provider and kind", () => {
     ];
 
     it.each(defaults)("resets Kind to the default for %s when the provider is switched to it", (provider, kind) => {
-        renderForm({ preset: { provider: provider === "openai" ? "github" : "openai", kind: "api_key" } });
+        renderForm({ preset: { provider: provider === "custom" ? "github" : "custom", kind: "api_key" } });
         choose(selectOf("Provider"), provider);
         expect(selectOf("Provider").value).toBe(provider);
         expect(selectOf("Kind").value).toBe(kind);
@@ -280,7 +310,8 @@ describe("AccountForm: provider and kind", () => {
     ];
 
     it.each(kindOptions)("offers the right kinds for %s", (provider, expected) => {
-        renderForm({ preset: { provider, kind: expected[0] as AccountKind } });
+        renderForm();
+        choose(selectOf("Provider"), provider);
         expect(optionValues("Kind")).toEqual(expected);
     });
 
@@ -318,7 +349,7 @@ describe("AccountForm: provider and kind", () => {
 
         choose(selectOf("Provider"), "anthropic");
         expect(hasField("AWS profile")).toBe(false);
-        expect(hasField("Default model")).toBe(true);
+        expect(hasField("Default model")).toBe(false);
 
         choose(selectOf("Provider"), "openai");
         expect(hasField("Default model")).toBe(false);
@@ -450,7 +481,7 @@ describe("AccountForm: generic Add and Save", () => {
         expect(createAccount.mock.calls[0][0].secret_ref).toEqual({ backend: "plaintext_dev", value: " s3cret " });
     });
 
-    it("builds AWS and Anthropic context from their own fields", () => {
+    it("builds AWS context from its own fields, and Anthropic has none of its own", () => {
         const { createAccount } = renderForm();
         useBackend("env");
         choose(selectOf("Provider"), "aws");
@@ -466,13 +497,9 @@ describe("AccountForm: generic Add and Save", () => {
         });
 
         choose(selectOf("Provider"), "anthropic");
-        typeInto(inputOf("Default model"), " claude-sonnet-4-6 ");
         fireEvent.click(button("Add Account"));
-        expect(createAccount.mock.calls[1][0]).toMatchObject({
-            provider: "anthropic",
-            kind: "api_key",
-            context: { anthropic_model: "claude-sonnet-4-6" },
-        });
+        expect(createAccount.mock.calls[1][0]).toMatchObject({ provider: "anthropic", kind: "api_key" });
+        expect(createAccount.mock.calls[1][0].context.anthropic_model).toBeUndefined();
     });
 
     it("drops fields of the provider that was switched away from", () => {

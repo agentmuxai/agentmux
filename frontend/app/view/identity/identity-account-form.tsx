@@ -302,6 +302,8 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
 
     // Form field signals
     const f = createFormFields(editing, preset);
+    // Settled when the form opens: choosing another provider in it does not take its own select away.
+    const chosen = alreadyChosen(preset, editing(), f);
     const key = createKeyFlow(editing);
     const ctx: FormCtx = { model, editing, isEdit, f, key };
 
@@ -320,8 +322,10 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
                 </Show>
 
                 <NameField f={f} />
-                <ProviderField f={f} />
-                <KindField f={f} />
+                <Show when={!chosen}>
+                    <ProviderField f={f} />
+                    <KindField f={f} />
+                </Show>
 
                 <FormField label={t("accountForm.label.displayName")}>
                     <TextInput
@@ -346,6 +350,18 @@ export function AccountForm({ model, inline }: { model: IdentityViewModel; inlin
             {form}
         </div>
     );
+}
+
+/** The providers with one way to connect with a key (an API key): choosing it leaves nothing to pick. */
+const SOLE_KEY_PROVIDERS: AccountProvider[] = ["anthropic", "openai", "agentmux"];
+
+/**
+ * Whether the person has already chosen the provider and the kind before the form opens, so it does not ask again: from
+ * the connector's own card (a preset) or the account being edited, with a provider that has one key kind, an API key. A
+ * custom account, or a provider with more kinds (GitHub, AWS), still asks for what is left to choose.
+ */
+function alreadyChosen(preset: AddPreset, editing: Account | null, f: FormFields): boolean {
+    return (editing !== null || preset !== null) && SOLE_KEY_PROVIDERS.includes(f.provider()) && f.kind() === "api_key";
 }
 
 /** What the Name field suggests: the provider's own name, which follows the Provider select. */
@@ -660,11 +676,6 @@ function ProviderContextFields({ f }: { f: FormFields }): JSX.Element {
                 </FormField>
             </Show>
 
-            <Show when={f.provider() === "anthropic"}>
-                <FormField label={t("accountForm.label.defaultModel")}>
-                    <TextInput class="identity-input" type="text" value={f.anthropicModel()} onInput={(e) => f.setAnthropicModel(e.currentTarget.value)} placeholder="claude-sonnet-4-6" />
-                </FormField>
-            </Show>
         </>
     );
 }
