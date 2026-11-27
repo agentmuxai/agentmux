@@ -9,9 +9,9 @@
  * still coming share it.
  */
 
-const PERF_LOG_PREFIX = "[perf]";
+export const PERF_LOG_PREFIX = "[perf]";
 /** Fewer pointer moves than this is a click on the border, not a drag: no line. */
-const MIN_MOVES = 5;
+export const MIN_MOVES = 5;
 /** A border drawn this long after its pointer move, in ms, is counted as late. */
 export const LATE_LAG_MS = 50;
 
