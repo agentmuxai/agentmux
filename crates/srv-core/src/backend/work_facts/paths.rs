@@ -122,10 +122,13 @@ pub fn path_matches(file: &str, target: &str) -> bool {
 /// a GitLab project's path name some unrelated GitHub repository, or none.
 pub fn normalize_repo(raw: &str) -> Option<String> {
     let s = raw.trim().trim_end_matches('/');
-    let s = s.strip_suffix(".git").unwrap_or(s);
+    let s = if s.starts_with("remote:") { s } else { s.strip_suffix(".git").unwrap_or(s) };
     // The host (when the text names one) and everything after it: the part after `://host/`, or after the `:` of an
     // scp-style `user@host:path`.
-    let (host, path) = if let Some((scheme, rest)) = s.split_once("://") {
+    let (host, path) = if let Some(remote) = s.strip_prefix("remote:") {
+        let (host, path) = remote.split_once('/')?;
+        (Some(host.to_ascii_lowercase()), path)
+    } else if let Some((scheme, rest)) = s.split_once("://") {
         if scheme.eq_ignore_ascii_case("file") {
             return None;
         }
@@ -296,6 +299,7 @@ mod tests {
     fn a_remote_on_another_host_is_never_the_github_repository_of_the_same_name() {
         for (url, key) in [
             ("https://gitlab.com/group/api.git", "remote:gitlab.com/group/api"),
+            ("https://gitlab.com/group/api.git.git", "remote:gitlab.com/group/api.git"),
             ("git@gitlab.com:group/api.git", "remote:gitlab.com/group/api"),
             ("https://gitlab.com/group/sub/api", "remote:gitlab.com/group/sub/api"),
             ("ssh://git@git.example.org:2222/team/api.git", "remote:git.example.org/team/api"),
@@ -305,6 +309,7 @@ mod tests {
         ] {
             let got = normalize_repo(url);
             assert_eq!(got.as_deref(), Some(key), "{url}");
+            assert_eq!(normalize_repo(got.as_deref().unwrap()), got, "{url} must normalize idempotently");
             assert!(crate::backend::storage::work_card_prs::github_repo(key).is_none(), "{key} is not a GitHub repository");
         }
         assert_eq!(normalize_repo("https://gitea.local/lonely.git"), None, "a path of one segment names no repository");
