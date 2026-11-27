@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 
-use super::{origin_sig, withhold};
+use super::{live, origin_sig, withhold};
 use crate::backend::message_origin::RecordOrigin;
 use crate::backend::mps;
 use crate::backend::storage::filestore::{AppendPos, FileStore};
@@ -306,7 +306,6 @@ pub(crate) fn append_transcript_with(
     echo: Option<&str>,
     single_copy: bool,
 ) {
-    use crate::backend::agent_session::OUTPUT_FILE;
     // The records exactly as they are written (`append_lines` normalizes to
     // complete, non-blank lines): the event carries these bytes, and its
     // `offset` is where they landed, so a consumer can match the event to a
@@ -320,7 +319,60 @@ pub(crate) fn append_transcript_with(
         return;
     }
     let _order = transcript_order_lock(block_id);
+    if !stamp_tsidx {
+        append_lines_run(broker, block_id, &records, filestore, global, stamp_tsidx, echo, single_copy);
+        return;
+    }
+    // An agent stream: the fragments of a reply in progress are held in `output.live`, not in `output`.
+    let global_only = single_copy && global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
+    let targets = live::targets(block_id, filestore, global, global_only);
+    if let Some(left) = live::recover_once(block_id, &targets) {
+        if !left.is_empty() {
+            append_lines_run(broker, block_id, &left, filestore, global, stamp_tsidx, None, single_copy);
+        }
+    }
+    for run in live::plan(block_id, &records) {
+        match run {
+            live::Run::Lines(lines) => append_lines_run(broker, block_id, &lines, filestore, global, stamp_tsidx, echo, single_copy),
+            live::Run::Fragments(lines) => {
+                live::append_fragments(&targets, &lines);
+                publish_fragments(broker, block_id, &lines);
+            }
+            live::Run::ClearLive => live::clear(&targets),
+        }
+    }
+}
 
+/// Tell the block's panes of fragment lines held in the live file. The event names no position: the
+/// pane's cursor takes an event it cannot place as it did before positions, so the feed is as it was.
+fn publish_fragments(broker: Option<&mps::Broker>, block_id: &str, records: &[u8]) {
+    let Some(broker) = broker else { return };
+    let event_data = mps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: crate::backend::agent_session::OUTPUT_FILE.to_string(),
+        fileop: mps::FILE_OP_APPEND.to_string(),
+        data64: base64::engine::general_purpose::STANDARD.encode(records),
+        offset: None,
+        pos: Vec::new(),
+        echo: None,
+    };
+    broker.publish_event::<crate::backend::mps_events::BlockFile>(&event_data, vec![format!("block:{block_id}")], 0);
+}
+
+/// Write complete lines to the block's `output` and the agent's global zone, then announce them with
+/// where they landed. The caller holds the block's order lock and has put the lines in order.
+#[allow(clippy::too_many_arguments)]
+fn append_lines_run(
+    broker: Option<&mps::Broker>,
+    block_id: &str,
+    records: &[u8],
+    filestore: Option<&Arc<FileStore>>,
+    global: Option<(&Arc<FileStore>, &str)>,
+    stamp_tsidx: bool,
+    echo: Option<&str>,
+    single_copy: bool,
+) {
+    use crate::backend::agent_session::OUTPUT_FILE;
     let mut offset = None;
     let mut pos = Vec::new();
     // Single copy: the agent's zone first; the block's copy only if that failed.

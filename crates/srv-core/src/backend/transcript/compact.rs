@@ -210,6 +210,8 @@ struct Msg {
     /// A fragment this module cannot reassemble, or a message of another role.
     unproven: bool,
     closed: bool,
+    /// Its `message_stop` fragment was seen.
+    stopped: bool,
     session_id: Option<Value>,
     parent: Option<Value>,
 }
@@ -243,7 +245,8 @@ impl Msg {
                 _ => self.unproven = true,
             },
             "content_block_delta" => self.take_delta(index, event.get("delta")),
-            "content_block_stop" | "message_delta" | "message_stop" => {}
+            "message_stop" => self.stopped = true,
+            "content_block_stop" | "message_delta" => {}
             _ => self.unproven = true,
         }
     }
@@ -271,6 +274,17 @@ impl Msg {
     }
 }
 
+/// What kind of line [`Scan::line`] took.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Seen {
+    Fragment,
+    /// A complete `assistant` line.
+    Complete,
+    /// A turn boundary.
+    Boundary,
+    Other,
+}
+
 /// What one pass over a window learned: the messages its fragments and complete lines name.
 #[derive(Default)]
 struct Scan {
@@ -290,27 +304,34 @@ impl Scan {
         self.msgs.entry(id.to_string()).or_default()
     }
 
-    /// Take line `i`.
-    fn line(&mut self, i: usize, raw: &str) {
+    /// Take line `i`, and say what kind of line it was.
+    fn line(&mut self, i: usize, raw: &str) -> Seen {
         // Cheap reject: a line that is not a JSON object is only ever kept.
         if !raw.starts_with('{') {
-            return;
+            return Seen::Other;
         }
-        let Ok(v) = serde_json::from_str::<Value>(raw) else { return };
+        let Ok(v) = serde_json::from_str::<Value>(raw) else { return Seen::Other };
         let key = match v.get("parent_tool_use_id") {
             Some(Value::String(s)) => s.clone(),
             _ => String::new(),
         };
         match line_type(&v) {
-            "stream_event" => self.fragment(i, &v, key),
-            "assistant" => self.complete_line(&v),
+            "stream_event" => {
+                self.fragment(i, &v, key);
+                Seen::Fragment
+            }
+            "assistant" => {
+                self.complete_line(&v);
+                Seen::Complete
+            }
             _ if is_boundary(&v) => {
                 for m in self.msgs.values_mut() {
                     m.closed = true;
                 }
                 self.current.clear();
+                Seen::Boundary
             }
-            _ => {}
+            _ => Seen::Other,
         }
     }
 
@@ -423,7 +444,7 @@ fn interrupted_line(id: &str, m: &Msg, unmatched: &[&StreamBlock]) -> String {
 pub fn plan_window<S: AsRef<str>>(lines: &[S], end: WindowEnd) -> Plan {
     let mut scan = Scan::default();
     for (i, raw) in lines.iter().enumerate() {
-        scan.line(i, raw.as_ref());
+        let _ = scan.line(i, raw.as_ref());
     }
     let mut actions = vec![Action::Keep; lines.len()];
     let mut stats = Stats { lines: lines.len(), orphan_fragments: scan.orphan.len(), ..Stats::default() };
@@ -458,6 +479,126 @@ pub fn plan_window<S: AsRef<str>>(lines: &[S], end: WindowEnd) -> Plan {
 pub fn compact_lines<S: AsRef<str>>(lines: &[S], end: WindowEnd) -> (Vec<String>, Plan) {
     let plan = plan_window(lines, end);
     (plan.apply(lines), plan)
+}
+
+/// A line the write path appends to `output` in place of fragments it held back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Emit {
+    /// The `assistant` line of a reply that was cut off (compact form, interrupted).
+    Interrupted(String),
+    /// A fragment that cannot be proven redundant: kept in `output` as it was written.
+    Fragment(String),
+}
+
+impl Emit {
+    pub fn line(&self) -> &str {
+        match self {
+            Emit::Interrupted(l) | Emit::Fragment(l) => l,
+        }
+    }
+}
+
+/// What a closed scan leaves for `output`, in the order of the lines it came from: every fragment
+/// that is not proven redundant, and an interrupted line after the last fragment of a cut-off reply.
+fn leftovers(scan: &Scan, raw: &[String]) -> Vec<Emit> {
+    let mut out: Vec<(usize, Emit)> = scan.orphan.iter().map(|&i| (i, Emit::Fragment(raw[i].clone()))).collect();
+    for id in &scan.order {
+        let m = &scan.msgs[id];
+        let Some(&last) = m.fragment_lines.last() else { continue };
+        match fate(id, m, WindowEnd::Final) {
+            Fate::Drop(None) => {}
+            Fate::Drop(Some(line)) => out.push((last, Emit::Interrupted(line))),
+            Fate::Unproven | Fate::Pending => out.extend(m.fragment_lines.iter().map(|&i| (i, Emit::Fragment(raw[i].clone())))),
+        }
+    }
+    out.sort_by_key(|(i, _)| *i);
+    out.into_iter().map(|(_, e)| e).collect()
+}
+
+/// The write path's view of one agent's reply as it streams: fragments are held in `output.live`,
+/// and this tells when they have become redundant (every block is in a complete line and the
+/// message has stopped), and what must go to `output` instead when a turn ends without that.
+#[derive(Default)]
+pub struct LiveReply {
+    scan: Scan,
+    /// Every line taken since the last reset; only the fragment lines are kept.
+    raw: Vec<String>,
+}
+
+/// What [`LiveReply::before`] says of the line it took.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Before {
+    /// The line is a stream fragment: hold it in `output.live`, not in `output`.
+    pub fragment: bool,
+    /// At a turn boundary: what the held-back fragments leave for `output`, to go before this line.
+    pub emits: Vec<Emit>,
+    /// A turn boundary ended a reply that held fragments: the live file is to be emptied.
+    pub ended: bool,
+}
+
+impl LiveReply {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Take the next line the CLI wrote, before it is stored. At a turn boundary the answer is what
+    /// the held-back fragments leave for `output`, to be written before the boundary line.
+    pub fn before(&mut self, line: &str) -> Before {
+        let i = self.raw.len();
+        let seen = self.scan.line(i, line);
+        let fragment = seen == Seen::Fragment;
+        self.raw.push(if fragment { line.to_string() } else { String::new() });
+        if seen != Seen::Boundary {
+            return Before { fragment, emits: Vec::new(), ended: false };
+        }
+        let ended = self.holds_fragments();
+        let emits = leftovers(&self.scan, &self.raw);
+        *self = Self::default();
+        Before { fragment, emits, ended }
+    }
+
+    /// Whether the fragments held back so far are all redundant now. True also when there are none
+    /// (nothing to clear). Call after a line is stored; on true with fragments held, clear
+    /// `output.live` and call [`LiveReply::reset`].
+    pub fn settled(&self) -> bool {
+        self.scan.orphan.is_empty()
+            && self.scan.order.iter().all(|id| {
+                let m = &self.scan.msgs[id];
+                m.fragment_lines.is_empty() || (m.stopped && matches!(fate(id, m, WindowEnd::Open), Fate::Drop(None)))
+            })
+    }
+
+    /// Whether any fragment is held.
+    pub fn holds_fragments(&self) -> bool {
+        !self.scan.orphan.is_empty() || self.scan.msgs.values().any(|m| !m.fragment_lines.is_empty())
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// What a start finds in `output.live`, left by a process that was killed mid-reply: `tail` is the
+/// last complete lines of `output` (their `assistant` lines say which blocks are already stored),
+/// `live` the held fragments. Returns what must be appended to `output` before `output.live` is emptied.
+pub fn recover_live<S: AsRef<str>, T: AsRef<str>>(tail: &[S], live: &[T]) -> Vec<Emit> {
+    let mut r = LiveReply::new();
+    for l in tail {
+        let l = l.as_ref();
+        if l.contains("\"assistant\"") {
+            let i = r.raw.len();
+            if r.scan.line(i, l) == Seen::Complete {
+                r.raw.push(String::new());
+            }
+        }
+    }
+    for l in live {
+        let _ = r.before(l.as_ref());
+    }
+    for m in r.scan.msgs.values_mut() {
+        m.closed = true;
+    }
+    leftovers(&r.scan, &r.raw)
 }
 
 /// Which check failed, with counts and positions only (never line content).
