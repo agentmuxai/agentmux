@@ -338,7 +338,7 @@ mod tests {
         let vault = vault();
         let req = key_req(json!({ "provider": "anthropic", "name": "work" }));
         let secret_ref = store_secret(&vault, "acct-1", &req, None).await.unwrap();
-        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer, got {secret_ref:?}") };
+        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer") };
         let row = vault.vault_get(entry).unwrap().expect("the entry exists");
         assert_eq!((row.kind.as_str(), row.label.as_str()), ("api-key", "anthropic account key: work"));
         let mut account = key_account_row(&req, "acct-1", None, secret_ref.clone(), "valid".into(), json!({}), "tail");
