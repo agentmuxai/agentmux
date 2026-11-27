@@ -2026,7 +2026,6 @@
     "accountForm.label.awsProfile": "AWS profile",
     "accountForm.label.roleArn": "Role ARN (optional)",
     "accountForm.label.region": "Region",
-    "accountForm.label.defaultModel": "Default model",
     "accountForm.placeholder.nameCustom": "Name this account",
     "accountForm.placeholder.githubLogin": "your GitHub login",
     "accountForm.placeholder.optional": "optional",

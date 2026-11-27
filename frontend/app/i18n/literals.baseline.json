@@ -228,7 +228,7 @@
     "frontend/app/view/global-bundle/GlobalMemoryImportBanner.tsx": 9,
     "frontend/app/view/global-bundle/GlobalMemoryTokenStrip.tsx": 10,
     "frontend/app/view/helpview/helpview.tsx": 2,
-    "frontend/app/view/identity/identity-account-form.tsx": 8,
+    "frontend/app/view/identity/identity-account-form.tsx": 7,
     "frontend/app/view/kanban/kanban-after.tsx": 5,
     "frontend/app/view/kanban/kanban-board-picker.tsx": 4,
     "frontend/app/view/kanban/kanban-board.tsx": 13,
