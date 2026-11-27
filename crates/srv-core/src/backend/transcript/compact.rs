@@ -231,175 +231,223 @@ fn is_boundary(v: &Value) -> bool {
     }
 }
 
-/// Plan one window of lines (each one JSON line, without its newline). `end` says whether more lines follow.
-pub fn plan_window<S: AsRef<str>>(lines: &[S], end: WindowEnd) -> Plan {
-    let mut actions = vec![Action::Keep; lines.len()];
-    let mut msgs: HashMap<String, Msg> = HashMap::new();
-    let mut order: Vec<String> = Vec::new();
-    // The message a stream is on, per parent tool use ("" for the main stream).
-    let mut current: HashMap<String, Option<String>> = HashMap::new();
-    let mut stats = Stats { lines: lines.len(), ..Stats::default() };
-    let mut orphan: Vec<usize> = Vec::new();
-
-    for (i, raw) in lines.iter().enumerate() {
-        let raw = raw.as_ref();
-        // Cheap reject: nearly every line is a fragment or has a type we only count.
-        if !raw.starts_with('{') {
-            continue;
+impl Msg {
+    /// Take one fragment event of this message (its line is already recorded).
+    fn take_event(&mut self, ev: &str, event: &Value) {
+        let index = event.get("index").and_then(Value::as_u64);
+        match ev {
+            "content_block_start" => match (index, event.get("content_block")) {
+                (Some(ix), Some(b)) => {
+                    self.blocks.insert(ix, StreamBlock::new(b));
+                }
+                _ => self.unproven = true,
+            },
+            "content_block_delta" => self.take_delta(index, event.get("delta")),
+            "content_block_stop" | "message_delta" | "message_stop" => {}
+            _ => self.unproven = true,
         }
-        let Ok(v) = serde_json::from_str::<Value>(raw) else { continue };
+    }
+
+    fn take_delta(&mut self, index: Option<u64>, delta: Option<&Value>) {
+        let (Some(ix), Some(delta)) = (index, delta) else {
+            self.unproven = true;
+            return;
+        };
+        let Some(b) = self.blocks.get_mut(&ix) else {
+            self.unproven = true;
+            return;
+        };
+        let s = |k: &str| delta.get(k).and_then(Value::as_str).unwrap_or("");
+        match (delta.get("type").and_then(Value::as_str), b.kind.as_str()) {
+            (Some("text_delta"), "text") => b.text.push_str(s("text")),
+            (Some("thinking_delta"), "thinking") => b.thinking.push_str(s("thinking")),
+            (Some("signature_delta"), "thinking") => b.signature.push_str(s("signature")),
+            (Some("input_json_delta"), "tool_use") => b.partial_json.push_str(s("partial_json")),
+            _ => {
+                b.unknown = true;
+                self.unproven = true;
+            }
+        }
+    }
+}
+
+/// What one pass over a window learned: the messages its fragments and complete lines name.
+#[derive(Default)]
+struct Scan {
+    msgs: HashMap<String, Msg>,
+    order: Vec<String>,
+    /// The message a stream is on, per parent tool use ("" for the main stream).
+    current: HashMap<String, Option<String>>,
+    /// Fragments that belong to no message seen to start.
+    orphan: Vec<usize>,
+}
+
+impl Scan {
+    fn msg(&mut self, id: &str) -> &mut Msg {
+        if !self.msgs.contains_key(id) {
+            self.order.push(id.to_string());
+        }
+        self.msgs.entry(id.to_string()).or_default()
+    }
+
+    /// Take line `i`.
+    fn line(&mut self, i: usize, raw: &str) {
+        // Cheap reject: a line that is not a JSON object is only ever kept.
+        if !raw.starts_with('{') {
+            return;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(raw) else { return };
         let key = match v.get("parent_tool_use_id") {
             Some(Value::String(s)) => s.clone(),
             _ => String::new(),
         };
         match line_type(&v) {
-            "stream_event" => {
-                let Some(event) = v.get("event") else {
-                    orphan.push(i);
-                    continue;
-                };
-                let ev = event.get("type").and_then(Value::as_str).unwrap_or("");
-                if ev == "message_start" {
-                    let id = field(event, &["message", "id"]).and_then(Value::as_str).map(str::to_string);
-                    current.insert(key, id.clone());
-                    let Some(id) = id else {
-                        orphan.push(i);
-                        continue;
-                    };
-                    if !msgs.contains_key(&id) {
-                        order.push(id.clone());
-                    }
-                    let m = msgs.entry(id).or_default();
-                    m.fragment_lines.push(i);
-                    m.session_id = m.session_id.take().or_else(|| v.get("session_id").cloned());
-                    m.parent = m.parent.take().or_else(|| v.get("parent_tool_use_id").cloned());
-                    // A message of another role (a user turn carrying tool results) is not an assistant reply.
-                    if field(event, &["message", "role"]).and_then(Value::as_str) != Some("assistant") {
-                        m.unproven = true;
-                    }
-                    continue;
+            "stream_event" => self.fragment(i, &v, key),
+            "assistant" => self.complete_line(&v),
+            _ if is_boundary(&v) => {
+                for m in self.msgs.values_mut() {
+                    m.closed = true;
                 }
-                let Some(id) = current.get(&key).cloned().flatten() else {
-                    orphan.push(i);
-                    continue;
-                };
-                let Some(m) = msgs.get_mut(&id) else {
-                    orphan.push(i);
-                    continue;
-                };
-                m.fragment_lines.push(i);
-                let index = event.get("index").and_then(Value::as_u64);
-                match ev {
-                    "content_block_start" => match (index, event.get("content_block")) {
-                        (Some(ix), Some(b)) => {
-                            m.blocks.insert(ix, StreamBlock::new(b));
-                        }
-                        _ => m.unproven = true,
-                    },
-                    "content_block_delta" => {
-                        let (Some(ix), Some(delta)) = (index, event.get("delta")) else {
-                            m.unproven = true;
-                            continue;
-                        };
-                        let Some(b) = m.blocks.get_mut(&ix) else {
-                            m.unproven = true;
-                            continue;
-                        };
-                        let s = |k: &str| delta.get(k).and_then(Value::as_str);
-                        match (delta.get("type").and_then(Value::as_str), b.kind.as_str()) {
-                            (Some("text_delta"), "text") => b.text.push_str(s("text").unwrap_or("")),
-                            (Some("thinking_delta"), "thinking") => b.thinking.push_str(s("thinking").unwrap_or("")),
-                            (Some("signature_delta"), "thinking") => b.signature.push_str(s("signature").unwrap_or("")),
-                            (Some("input_json_delta"), "tool_use") => b.partial_json.push_str(s("partial_json").unwrap_or("")),
-                            _ => {
-                                b.unknown = true;
-                                m.unproven = true;
-                            }
-                        }
-                    }
-                    "content_block_stop" | "message_delta" | "message_stop" => {}
-                    _ => m.unproven = true,
-                }
+                self.current.clear();
             }
-            "assistant" => {
-                if v.get("partial").and_then(Value::as_bool) == Some(true) {
-                    continue;
-                }
-                let Some(id) = field(&v, &["message", "id"]).and_then(Value::as_str) else { continue };
-                if !msgs.contains_key(id) {
-                    order.push(id.to_string());
-                }
-                let m = msgs.entry(id.to_string()).or_default();
-                m.has_complete = true;
-                if let Some(Value::Array(blocks)) = field(&v, &["message", "content"]) {
-                    m.complete.extend(blocks.iter().cloned());
-                }
-            }
-            _ => {
-                if is_boundary(&v) {
-                    for m in msgs.values_mut() {
-                        m.closed = true;
-                    }
-                    current.clear();
-                }
-            }
+            _ => {}
         }
     }
 
-    let mut synth = Vec::new();
-    for id in &order {
-        let m = &msgs[id];
-        if m.fragment_lines.is_empty() {
-            continue;
+    fn fragment(&mut self, i: usize, v: &Value, key: String) {
+        let Some(event) = v.get("event") else {
+            self.orphan.push(i);
+            return;
+        };
+        let ev = event.get("type").and_then(Value::as_str).unwrap_or("");
+        if ev == "message_start" {
+            self.message_start(i, v, event, key);
+            return;
         }
-        let n = m.fragment_lines.len();
-        if m.unproven || m.blocks.is_empty() {
-            stats.unproven_fragments += n;
-            continue;
-        }
-        // Match every stream block to a block of a complete line, each complete block once.
-        let mut used = vec![false; m.complete.len()];
-        let mut unmatched: Vec<&StreamBlock> = Vec::new();
-        for b in m.blocks.values() {
-            match m.complete.iter().enumerate().find(|(j, c)| !used[*j] && b.matches(c)) {
-                Some((j, _)) => used[j] = true,
-                None => unmatched.push(b),
-            }
-        }
-        if unmatched.is_empty() && m.has_complete {
-            for &i in &m.fragment_lines {
-                actions[i] = Action::Drop;
-            }
-            stats.dropped_fragments += n;
-        } else if unmatched.is_empty() {
-            // Blocks with nothing to match and no complete line cannot happen; keep what we do not understand.
-            stats.unproven_fragments += n;
-        } else if !m.closed && end == WindowEnd::Open {
-            stats.pending_fragments += n;
-        } else if unmatched.iter().any(|b| b.unknown) {
-            // Closed, but a block we cannot reassemble is among the unmatched: keep the fragments whole.
-            stats.unproven_fragments += n;
-        } else {
-            for &i in &m.fragment_lines {
-                actions[i] = Action::Drop;
-            }
-            stats.dropped_fragments += n;
-            let content: Vec<Value> = unmatched.iter().map(|b| b.as_content()).collect();
-            let mut line = json!({
-                "type": "assistant",
-                "interrupted": true,
-                "message": { "id": id, "type": "message", "role": "assistant", "content": content, "stop_reason": Value::Null },
-            });
-            if let Some(s) = &m.session_id {
-                line["session_id"] = s.clone();
-            }
-            if let Some(p) = &m.parent {
-                line["parent_tool_use_id"] = p.clone();
-            }
-            synth.push(Synth { after: *m.fragment_lines.last().expect("non-empty"), message_id: id.clone(), line: line.to_string() });
+        let Some(id) = self.current.get(&key).cloned().flatten() else {
+            self.orphan.push(i);
+            return;
+        };
+        let Some(m) = self.msgs.get_mut(&id) else {
+            self.orphan.push(i);
+            return;
+        };
+        m.fragment_lines.push(i);
+        m.take_event(ev, event);
+    }
+
+    fn message_start(&mut self, i: usize, v: &Value, event: &Value, key: String) {
+        let id = field(event, &["message", "id"]).and_then(Value::as_str).map(str::to_string);
+        self.current.insert(key, id.clone());
+        let Some(id) = id else {
+            self.orphan.push(i);
+            return;
+        };
+        let m = self.msg(&id);
+        m.fragment_lines.push(i);
+        m.session_id = m.session_id.take().or_else(|| v.get("session_id").cloned());
+        m.parent = m.parent.take().or_else(|| v.get("parent_tool_use_id").cloned());
+        // A message of another role (a user turn carrying tool results) is not an assistant reply.
+        if field(event, &["message", "role"]).and_then(Value::as_str) != Some("assistant") {
+            m.unproven = true;
         }
     }
-    stats.orphan_fragments = orphan.len();
+
+    fn complete_line(&mut self, v: &Value) {
+        if v.get("partial").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let Some(id) = field(v, &["message", "id"]).and_then(Value::as_str) else { return };
+        let m = self.msg(id);
+        m.has_complete = true;
+        if let Some(Value::Array(blocks)) = field(v, &["message", "content"]) {
+            m.complete.extend(blocks.iter().cloned());
+        }
+    }
+}
+
+/// What becomes of one message's fragments.
+enum Fate {
+    /// Kept whole: a block or delta kind this module cannot reassemble, or nothing to prove.
+    Unproven,
+    /// Kept for now: the message may still get a complete line.
+    Pending,
+    /// Dropped, with the interrupted line that replaces them when some block has no complete counterpart.
+    Drop(Option<String>),
+}
+
+fn fate(id: &str, m: &Msg, end: WindowEnd) -> Fate {
+    if m.unproven || m.blocks.is_empty() {
+        return Fate::Unproven;
+    }
+    // Match every stream block to a block of a complete line, each complete block once.
+    let mut used = vec![false; m.complete.len()];
+    let mut unmatched: Vec<&StreamBlock> = Vec::new();
+    for b in m.blocks.values() {
+        match m.complete.iter().enumerate().find(|(j, c)| !used[*j] && b.matches(c)) {
+            Some((j, _)) => used[j] = true,
+            None => unmatched.push(b),
+        }
+    }
+    if unmatched.is_empty() {
+        // Blocks with nothing to match and no complete line cannot happen; keep what we do not understand.
+        return if m.has_complete { Fate::Drop(None) } else { Fate::Unproven };
+    }
+    if !m.closed && end == WindowEnd::Open {
+        return Fate::Pending;
+    }
+    if unmatched.iter().any(|b| b.unknown) {
+        return Fate::Unproven;
+    }
+    Fate::Drop(Some(interrupted_line(id, m, &unmatched)))
+}
+
+/// The `assistant` line of a reply that was cut off: the blocks its fragments built and no complete line holds.
+fn interrupted_line(id: &str, m: &Msg, unmatched: &[&StreamBlock]) -> String {
+    let content: Vec<Value> = unmatched.iter().map(|b| b.as_content()).collect();
+    let mut line = json!({
+        "type": "assistant",
+        "interrupted": true,
+        "message": { "id": id, "type": "message", "role": "assistant", "content": content, "stop_reason": Value::Null },
+    });
+    if let Some(s) = &m.session_id {
+        line["session_id"] = s.clone();
+    }
+    if let Some(p) = &m.parent {
+        line["parent_tool_use_id"] = p.clone();
+    }
+    line.to_string()
+}
+
+/// Plan one window of lines (each one JSON line, without its newline). `end` says whether more lines follow.
+pub fn plan_window<S: AsRef<str>>(lines: &[S], end: WindowEnd) -> Plan {
+    let mut scan = Scan::default();
+    for (i, raw) in lines.iter().enumerate() {
+        scan.line(i, raw.as_ref());
+    }
+    let mut actions = vec![Action::Keep; lines.len()];
+    let mut stats = Stats { lines: lines.len(), orphan_fragments: scan.orphan.len(), ..Stats::default() };
+    let mut synth = Vec::new();
+    for id in &scan.order {
+        let m = &scan.msgs[id];
+        let n = m.fragment_lines.len();
+        if n == 0 {
+            continue;
+        }
+        match fate(id, m, end) {
+            Fate::Unproven => stats.unproven_fragments += n,
+            Fate::Pending => stats.pending_fragments += n,
+            Fate::Drop(interrupted) => {
+                for &i in &m.fragment_lines {
+                    actions[i] = Action::Drop;
+                }
+                stats.dropped_fragments += n;
+                if let Some(line) = interrupted {
+                    synth.push(Synth { after: *m.fragment_lines.last().expect("non-empty"), message_id: id.clone(), line });
+                }
+            }
+        }
+    }
     synth.sort_by_key(|s| s.after);
     stats.interrupted_lines = synth.len();
     stats.kept = actions.iter().filter(|a| **a == Action::Keep).count();
@@ -488,60 +536,67 @@ fn ids_of(v: &Value, out: &mut HashSet<String>) {
 /// What [`verify`] builds per dropped block: kind, text or thinking or partial json, signature, tool id and name, unknown.
 type VBlock = (String, String, String, String, bool);
 
-/// Checks L1 to L3 of the spec: `new` is a correct compact form of `old`. Written apart from
-/// [`plan_window`]: its own reassembly, so a fault in one does not pass the other.
-pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), CheckFailure> {
-    // L1: the lines that are not fragments are the same sequence, byte for byte; the kept fragments are a subsequence of the old ones.
+/// The lines of the new window told apart from what the old one had.
+struct Split<'a> {
+    /// Kept lines, including interrupted lines the old window already held.
+    plain: Vec<&'a str>,
+    /// Interrupted lines this pass wrote.
+    synth: Vec<&'a str>,
+    /// Old fragments that are not in the new window.
+    dropped: Vec<&'a str>,
+}
+
+/// Check L1: the lines that are not fragments are the same sequence, byte for byte; the kept fragments are a subsequence of the old ones.
+fn check_l1<'a, S: AsRef<str>, T: AsRef<str>>(old: &'a [S], new: &'a [T]) -> Result<Split<'a>, CheckFailure> {
     let old_other: Vec<&str> = old.iter().map(AsRef::as_ref).filter(|l| !is_fragment(l)).collect();
     // An interrupted line the old window already had is an ordinary kept line; any other is one this pass wrote.
     let mut old_interrupted: HashMap<&str, usize> = HashMap::new();
     for l in old.iter().map(AsRef::as_ref).filter(|l| is_interrupted(l)) {
         *old_interrupted.entry(l).or_insert(0) += 1;
     }
-    let (mut new_synth_free, mut synth_lines): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    let (mut plain, mut synth): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for l in new.iter().map(AsRef::as_ref) {
         match old_interrupted.get_mut(l) {
             Some(n) if *n > 0 => {
                 *n -= 1;
-                new_synth_free.push(l);
+                plain.push(l);
             }
-            _ if is_interrupted(l) => synth_lines.push(l),
-            _ => new_synth_free.push(l),
+            _ if is_interrupted(l) => synth.push(l),
+            _ => plain.push(l),
         }
     }
-    let new_other: Vec<&str> = new_synth_free.iter().copied().filter(|l| !is_fragment(l)).collect();
+    let new_other: Vec<&str> = plain.iter().copied().filter(|l| !is_fragment(l)).collect();
     if old_other != new_other {
         let first = old_other.iter().zip(new_other.iter()).position(|(a, b)| a != b).unwrap_or(old_other.len().min(new_other.len()));
         return Err(CheckFailure::L1 { detail: format!("lines other than fragments differ from position {first} (old {}, new {})", old_other.len(), new_other.len()) });
     }
     let old_frag: Vec<&str> = old.iter().map(AsRef::as_ref).filter(|l| is_fragment(l)).collect();
-    let new_frag: Vec<&str> = new_synth_free.iter().copied().filter(|l| is_fragment(l)).collect();
-    {
-        let mut it = old_frag.iter();
-        for f in &new_frag {
-            if !it.any(|o| o == f) {
-                return Err(CheckFailure::L1 { detail: "a kept fragment is not, in order, one of the old fragments".into() });
-            }
+    let new_frag: Vec<&str> = plain.iter().copied().filter(|l| is_fragment(l)).collect();
+    let mut it = old_frag.iter();
+    for f in &new_frag {
+        if !it.any(|o| o == f) {
+            return Err(CheckFailure::L1 { detail: "a kept fragment is not, in order, one of the old fragments".into() });
         }
     }
     // The dropped fragments are the old ones that the kept ones do not account for, in order.
-    let dropped: Vec<&str> = {
-        let mut out = Vec::new();
-        let mut kept = new_frag.iter().peekable();
-        for o in &old_frag {
-            if kept.peek().is_some_and(|k| *k == o) {
-                kept.next();
-            } else {
-                out.push(*o);
-            }
+    let mut dropped = Vec::new();
+    let mut kept = new_frag.iter().peekable();
+    for o in &old_frag {
+        if kept.peek().is_some_and(|k| *k == o) {
+            kept.next();
+        } else {
+            dropped.push(*o);
         }
-        out
-    };
+    }
+    Ok(Split { plain, synth, dropped })
+}
 
-    // L2: every dropped fragment's message is covered by kept lines.
+/// The blocks the dropped fragments of each message reassemble to, built here and not by the planner.
+fn reassemble_dropped(dropped: &[&str]) -> Result<HashMap<String, BTreeMap<u64, VBlock>>, CheckFailure> {
+    let l2 = |detail: &str| CheckFailure::L2 { detail: detail.into() };
     let mut by_msg: HashMap<String, BTreeMap<u64, VBlock>> = HashMap::new();
     let mut cur: HashMap<String, Option<String>> = HashMap::new();
-    for l in &dropped {
+    for l in dropped {
         let v = parse(l).expect("is_fragment parsed it");
         let key = v.get("parent_tool_use_id").and_then(Value::as_str).unwrap_or("").to_string();
         let ev = v.get("event").cloned().unwrap_or(Value::Null);
@@ -551,7 +606,7 @@ pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), 
             continue;
         }
         let Some(Some(id)) = cur.get(&key).cloned() else {
-            return Err(CheckFailure::L2 { detail: "a dropped fragment has no message start before it".into() });
+            return Err(l2("a dropped fragment has no message start before it"));
         };
         let blocks = by_msg.entry(id).or_default();
         let ix = ev.get("index").and_then(Value::as_u64).unwrap_or(u64::MAX);
@@ -567,24 +622,47 @@ pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), 
             }
             "content_block_delta" => {
                 let Some(b) = blocks.get_mut(&ix) else {
-                    return Err(CheckFailure::L2 { detail: "a dropped delta has no block start".into() });
+                    return Err(l2("a dropped delta has no block start"));
                 };
                 match (d.get("type").and_then(Value::as_str), b.0.as_str()) {
                     (Some("text_delta"), "text") => b.1.push_str(&ds("text")),
                     (Some("thinking_delta"), "thinking") => b.1.push_str(&ds("thinking")),
                     (Some("signature_delta"), "thinking") => b.2.push_str(&ds("signature")),
                     (Some("input_json_delta"), "tool_use") => b.1.push_str(&ds("partial_json")),
-                    _ => return Err(CheckFailure::L2 { detail: "a dropped delta is of a kind the compact form does not reassemble".into() }),
+                    _ => return Err(l2("a dropped delta is of a kind the compact form does not reassemble")),
                 }
             }
             "content_block_stop" | "message_delta" | "message_stop" => {}
-            _ => return Err(CheckFailure::L2 { detail: "a dropped fragment is of an event kind the compact form does not reassemble".into() }),
+            _ => return Err(l2("a dropped fragment is of an event kind the compact form does not reassemble")),
         }
     }
+    Ok(by_msg)
+}
+
+/// Whether the content block `c` of a kept line is the reassembled block `b`.
+fn block_is(c: &Value, b: &VBlock) -> bool {
+    let (kind, body, sig, extra, _) = b;
+    if c.get("type").and_then(Value::as_str) != Some(kind.as_str()) {
+        return false;
+    }
+    let s = |k: &str| c.get(k).and_then(Value::as_str);
+    match kind.as_str() {
+        "text" => s("text") == Some(body.as_str()),
+        "thinking" => s("thinking") == Some(body.as_str()) && (sig.is_empty() || s("signature") == Some(sig.as_str())),
+        _ => {
+            let (tid, name) = extra.split_once('\u{1}').unwrap_or(("", ""));
+            let input = if body.is_empty() { Some(Value::Object(Map::new())) } else { serde_json::from_str::<Value>(body).ok() };
+            s("id") == Some(tid) && s("name") == Some(name) && input.map_or_else(|| c.get("partial_input_json").and_then(Value::as_str) == Some(body.as_str()), |i| c.get("input") == Some(&i))
+        }
+    }
+}
+
+/// Check L2: every dropped fragment's message is covered by kept lines, and an interrupted line holds only what its fragments built.
+fn check_l2(split: &Split<'_>, by_msg: &HashMap<String, BTreeMap<u64, VBlock>>) -> Result<(), CheckFailure> {
     // The kept complete blocks, and the interrupted lines' blocks, by message id.
     let mut kept_blocks: HashMap<String, Vec<Value>> = HashMap::new();
     let mut synth_blocks: HashMap<String, Vec<Value>> = HashMap::new();
-    for (is_synth, l) in new_synth_free.iter().map(|l| (false, *l)).chain(synth_lines.iter().map(|l| (true, *l))) {
+    for (is_synth, l) in split.plain.iter().map(|l| (false, *l)).chain(split.synth.iter().map(|l| (true, *l))) {
         let Some(v) = parse(l) else { continue };
         if line_type(&v) != "assistant" || v.get("partial").and_then(Value::as_bool) == Some(true) {
             continue;
@@ -594,43 +672,29 @@ pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), 
         let into = if is_synth { &mut synth_blocks } else { &mut kept_blocks };
         into.entry(id.to_string()).or_default().extend(bs.iter().cloned());
     }
-    for (id, blocks) in &by_msg {
+    for (id, blocks) in by_msg {
         let mut have: Vec<(Value, bool)> = kept_blocks.get(id).into_iter().flatten().map(|b| (b.clone(), false)).collect();
         have.extend(synth_blocks.get(id).into_iter().flatten().map(|b| (b.clone(), false)));
-        for (kind, body, sig, extra, unknown) in blocks.values() {
-            if *unknown {
+        for b in blocks.values() {
+            if b.4 {
                 return Err(CheckFailure::L2 { detail: "a dropped block is of a kind the compact form does not reassemble".into() });
             }
-            let found = have.iter_mut().find(|(c, used)| {
-                if *used || c.get("type").and_then(Value::as_str) != Some(kind.as_str()) {
-                    return false;
-                }
-                let s = |k: &str| c.get(k).and_then(Value::as_str);
-                match kind.as_str() {
-                    "text" => s("text") == Some(body.as_str()),
-                    "thinking" => s("thinking") == Some(body.as_str()) && (sig.is_empty() || s("signature") == Some(sig.as_str())),
-                    _ => {
-                        let (tid, name) = extra.split_once('\u{1}').unwrap_or(("", ""));
-                        let input = if body.is_empty() { Some(Value::Object(Map::new())) } else { serde_json::from_str::<Value>(body).ok() };
-                        s("id") == Some(tid) && s("name") == Some(name) && input.map_or_else(|| c.get("partial_input_json").and_then(Value::as_str) == Some(body.as_str()), |i| c.get("input") == Some(&i))
-                    }
-                }
-            });
-            match found {
+            match have.iter_mut().find(|(c, used)| !*used && block_is(c, b)) {
                 Some((_, used)) => *used = true,
-                None => return Err(CheckFailure::L2 { detail: format!("a dropped {kind} block of a message is in no kept line") }),
+                None => return Err(CheckFailure::L2 { detail: format!("a dropped {} block of a message is in no kept line", b.0) }),
             }
         }
     }
-    // An interrupted line holds only blocks that its fragments built (nothing invented).
     for (id, bs) in &synth_blocks {
-        let n = by_msg.get(id).map_or(0, BTreeMap::len);
-        if bs.len() > n {
+        if bs.len() > by_msg.get(id).map_or(0, BTreeMap::len) {
             return Err(CheckFailure::L2 { detail: "an interrupted line has more blocks than its fragments".into() });
         }
     }
+    Ok(())
+}
 
-    // L3: counts by kind differ only by the dropped fragments and the interrupted lines; every id survives.
+/// Check L3: counts by line kind differ only by the dropped fragments and the interrupted lines; every session and tool id survives.
+fn check_l3<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T], split: &Split<'_>) -> Result<(), CheckFailure> {
     let count = |ls: &mut dyn Iterator<Item = &str>| {
         let mut m: BTreeMap<String, i64> = BTreeMap::new();
         for l in ls {
@@ -640,15 +704,13 @@ pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), 
         m
     };
     let mut old_counts = count(&mut old.iter().map(AsRef::as_ref));
-    let new_counts = count(&mut new.iter().map(AsRef::as_ref));
-    *old_counts.entry("stream_event".into()).or_insert(0) -= dropped.len() as i64;
-    let synths = synth_lines.len() as i64;
-    *old_counts.entry("assistant".into()).or_insert(0) += synths;
+    *old_counts.entry("stream_event".into()).or_insert(0) -= split.dropped.len() as i64;
+    *old_counts.entry("assistant".into()).or_insert(0) += split.synth.len() as i64;
     old_counts.retain(|_, n| *n != 0);
-    let mut nc = new_counts;
-    nc.retain(|_, n| *n != 0);
-    if old_counts != nc {
-        return Err(CheckFailure::L3 { detail: format!("line counts by kind differ: expected {old_counts:?}, found {nc:?}") });
+    let mut new_counts = count(&mut new.iter().map(AsRef::as_ref));
+    new_counts.retain(|_, n| *n != 0);
+    if old_counts != new_counts {
+        return Err(CheckFailure::L3 { detail: format!("line counts by kind differ: expected {old_counts:?}, found {new_counts:?}") });
     }
     let (mut old_ids, mut new_ids) = (HashSet::new(), HashSet::new());
     for l in old {
@@ -666,6 +728,15 @@ pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), 
         return Err(CheckFailure::L3 { detail: format!("{lost} session or tool ids of the old lines are in no kept line") });
     }
     Ok(())
+}
+
+/// Checks L1 to L3 of the spec: `new` is a correct compact form of `old`. Written apart from
+/// [`plan_window`]: its own reassembly, so a fault in one does not pass the other.
+pub fn verify<S: AsRef<str>, T: AsRef<str>>(old: &[S], new: &[T]) -> Result<(), CheckFailure> {
+    let split = check_l1(old, new)?;
+    let by_msg = reassemble_dropped(&split.dropped)?;
+    check_l2(&split, &by_msg)?;
+    check_l3(old, new, &split)
 }
 
 /// Check L4: no `stream_event` line remains. A file that still has one is not declared compact.
