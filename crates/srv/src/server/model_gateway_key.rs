@@ -46,10 +46,10 @@ fn read(state: &AppState, grant: &Grant) -> Result<KeyAccount, (StatusCode, &'st
 
 /// [`read`] off the async runtime.
 pub(super) async fn key_of(state: &AppState, grant: &Grant) -> Result<KeyAccount, Response> {
-    let (state, grant) = (state.clone(), grant.clone());
-    match tokio::task::spawn_blocking(move || read(&state, &grant)).await {
+    let (st, gr) = (state.clone(), grant.clone());
+    match tokio::task::spawn_blocking(move || read(&st, &gr)).await {
         Ok(Ok(key)) => Ok(key),
-        Ok(Err((status, kind, why))) => Err(super::model_gateway_handlers::refuse(status, kind, &why)),
+        Ok(Err((status, kind, why))) => Err(super::model_gateway_handlers::denied(Some(&grant), &grant.route, status, kind, &why)),
         Err(_) => Err(super::model_gateway_handlers::refuse(StatusCode::INTERNAL_SERVER_ERROR, "api_error", "the key lookup failed")),
     }
 }

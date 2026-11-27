@@ -176,6 +176,9 @@ fn end_agent_tokens(name: &str, route: Option<&str>, min_age: Duration) {
 /// Drops the token for `key` and every record of it.
 fn end_token(reg: &mut Registry, key: &(String, String)) {
     if let Some(token) = reg.by_agent.remove(key) {
+        // Said in the log, so a later refusal of this token ("the gateway needs the agent's token") has its cause beside it.
+        let account = reg.by_digest.get(&digest(&token)).map(|g| g.account.clone()).unwrap_or_default();
+        tracing::info!(def_id = %key.0, route = %key.1, account = %account, "model gateway: a token was ended");
         reg.by_digest.remove(&digest(&token));
         reg.minted.remove(&digest(&token));
     }

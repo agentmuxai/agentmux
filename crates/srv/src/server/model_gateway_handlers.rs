@@ -36,6 +36,17 @@ fn gateway_client() -> &'static reqwest::Client {
     })
 }
 
+/// [`refuse`], and the refusal in the log: its status, why, the route and, when the token is known, the agent and the account.
+/// Nothing of the token or of any key. A harness shows a refused request as a bare "HTTP 401 Not logged in", so this line is
+/// where the cause is.
+pub(super) fn denied(grant: Option<&token::Grant>, route: &str, status: StatusCode, kind: &str, message: &str) -> Response {
+    match grant {
+        Some(g) => tracing::warn!(route, agent = %g.agent, account = %g.account, status = status.as_u16(), "model gateway: refused: {message}"),
+        None => tracing::warn!(route, status = status.as_u16(), "model gateway: refused: {message}"),
+    }
+    refuse(status, kind, message)
+}
+
 /// An error in the shape the harness already parses.
 pub(super) fn refuse(status: StatusCode, kind: &str, message: &str) -> Response {
     let body = json!({ "type": "error", "error": { "type": kind, "message": message } });
@@ -97,22 +108,22 @@ fn check_bound_peer(state: &AppState, grant: &token::Grant, parts: &axum::http::
 pub(crate) async fn handle_model_gateway(State(state): State<AppState>, Path((route_id, tail)): Path<(String, String)>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let Some(grant) = gw::bearer_token(&parts.headers).and_then(|t| token::grant_for(&t)) else {
-        return refuse(StatusCode::UNAUTHORIZED, "authentication_error", "the model gateway needs the agent's gateway token");
+        return denied(None, &route_id, StatusCode::UNAUTHORIZED, "authentication_error", "the model gateway needs the agent's gateway token");
     };
     if let Err(refused) = check_bound_peer(&state, &grant, &parts) {
         return refused;
     }
     let Some(route) = catalog::gateway_route(&route_id).filter(|r| r.id == grant.route) else {
-        return refuse(StatusCode::FORBIDDEN, "permission_error", "this token is not for that model route");
+        return denied(Some(&grant), &route_id, StatusCode::FORBIDDEN, "permission_error", "this token is not for that model route");
     };
     if !gw::path_allowed(route.harness, &tail) {
-        return refuse(StatusCode::NOT_FOUND, "not_found_error", "the gateway forwards only the harness's own model paths");
+        return denied(Some(&grant), &route.id, StatusCode::NOT_FOUND, "not_found_error", "the gateway forwards only the harness's own model paths");
     }
     // The key route has no chosen model: the agent asks for the models it always does.
     let key_route = route.id == catalog::KEY_ROUTE_ID;
     let chosen = launch::model_on_route(&state.mstore, &grant.def_id, route);
     if chosen.is_none() && !key_route {
-        return refuse(StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
+        return denied(Some(&grant), &route.id, StatusCode::FORBIDDEN, "permission_error", "this agent is not set to use that route");
     }
     // A cap used today (the agent's, or the route's) ends the request here, where it cannot be bypassed. 402 is the status
     // the provider's own out-of-credit answer has, after which the harness ends the turn rather than retrying.
