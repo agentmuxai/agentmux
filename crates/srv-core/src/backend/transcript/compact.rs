@@ -584,12 +584,9 @@ impl LiveReply {
 pub fn recover_live<S: AsRef<str>, T: AsRef<str>>(tail: &[S], live: &[T]) -> Vec<Emit> {
     let mut r = LiveReply::new();
     for l in tail {
-        let l = l.as_ref();
-        if l.contains("\"assistant\"") {
-            let i = r.raw.len();
-            if r.scan.line(i, l) == Seen::Complete {
-                r.raw.push(String::new());
-            }
+        // Only complete `assistant` lines tell which blocks are stored; a legacy fragment in the tail is not fed to the scan.
+        if let Some(v) = parse(l.as_ref()).filter(|v| line_type(v) == "assistant") {
+            r.scan.complete_line(&v);
         }
     }
     for l in live {

@@ -372,3 +372,17 @@ fn a_block_that_starts_with_text_already_in_it_is_proven_by_the_checker_too() {
     assert_eq!(kinds(&new), vec!["assistant", "result"]);
     assert_eq!(plan.stats.dropped_fragments, 5);
 }
+
+#[test]
+fn recovery_does_not_mistake_a_legacy_fragment_in_the_tail_for_a_stored_line() {
+    // The tail of `output` from before fragments were held back: a message_start naming the assistant role.
+    let tail: Vec<String> = vec![start("old"), assistant("m1", vec![json!({ "type": "text", "text": "stored whole" })])];
+    let live: Vec<String> = vec![start("m2"), block_start(0, json!({ "type": "text", "text": "" })), text_delta(0, "cut here")];
+    let emits = recover_live(&tail, &live);
+    assert_eq!(emits.len(), 1, "only the interrupted line: no copy of a live fragment, no empty line");
+    let Emit::Interrupted(l) = &emits[0] else { panic!("not an interrupted line: {emits:?}") };
+    assert!(l.contains("cut here") && l.contains("\"m2\""));
+    // A block already stored whole adds nothing.
+    let stored = vec![start("m3"), block_start(0, json!({ "type": "text", "text": "" })), text_delta(0, "whole")];
+    assert!(recover_live(&[assistant("m3", vec![json!({ "type": "text", "text": "whole" })])], &stored).is_empty());
+}
