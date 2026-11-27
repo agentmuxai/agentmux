@@ -618,7 +618,10 @@ fn reassemble_dropped(dropped: &[&str]) -> Result<HashMap<String, BTreeMap<u64, 
                 let kind = b.get("type").and_then(Value::as_str).unwrap_or("").to_string();
                 let extra = if kind == "tool_use" { format!("{}\u{1}{}", b.get("id").and_then(Value::as_str).unwrap_or(""), b.get("name").and_then(Value::as_str).unwrap_or("")) } else { String::new() };
                 let unknown = !matches!(kind.as_str(), "text" | "thinking" | "tool_use");
-                blocks.insert(ix, (kind, String::new(), String::new(), extra, unknown));
+                // A block may start with text, thinking or a signature already in it, as the planner's does.
+                let seed = |k: &str| if kind == "text" && k == "text" || kind == "thinking" && k != "text" { b.get(k).and_then(Value::as_str).unwrap_or("").to_string() } else { String::new() };
+                let (body, sig) = (if kind == "text" { seed("text") } else { seed("thinking") }, seed("signature"));
+                blocks.insert(ix, (kind, body, sig, extra, unknown));
             }
             "content_block_delta" => {
                 let Some(b) = blocks.get_mut(&ix) else {

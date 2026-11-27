@@ -356,3 +356,19 @@ fn a_survivor_fragment_fails_l4() {
     assert_eq!(no_fragments(&lines), Err(1));
     assert_eq!(no_fragments(&[user("x")]), Ok(()));
 }
+
+#[test]
+fn a_block_that_starts_with_text_already_in_it_is_proven_by_the_checker_too() {
+    let old: Vec<String> = vec![
+        start("m1"),
+        block_start(0, json!({ "type": "text", "text": "ab" })),
+        text_delta(0, "cd"),
+        block_start(1, json!({ "type": "thinking", "thinking": "th", "signature": "S" })),
+        delta(1, json!({ "type": "thinking_delta", "thinking": "ink" })),
+        assistant("m1", vec![json!({ "type": "text", "text": "abcd" }), json!({ "type": "thinking", "thinking": "think", "signature": "S" })]),
+        result(),
+    ];
+    let (new, plan) = check(&old, WindowEnd::Open);
+    assert_eq!(kinds(&new), vec!["assistant", "result"]);
+    assert_eq!(plan.stats.dropped_fragments, 5);
+}
