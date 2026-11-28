@@ -83,10 +83,12 @@ describe("captureZoomAnchor", () => {
 });
 
 describe("restore after a zoom", () => {
-    it("puts the anchor back as soon as the zoom changes, then checks it on later frames until two passes agree", () => {
+    it("puts the anchor back at the next frame after the zoom changes, not inside the change, then checks it on later frames until two passes agree", () => {
         const p = pane("a", [false, true, true]);
         captureZoomAnchor("a", P, 0);
         p.setZoom(1.1);
+        expect(p.adapter.restore).not.toHaveBeenCalled(); // the change itself reads nothing
+        frame();
         expect(p.adapter.restore).toHaveBeenCalledTimes(1);
         expect(p.adapter.restore).toHaveBeenCalledWith({ at: "held" });
         frame();
@@ -148,6 +150,7 @@ describe("restore after a zoom", () => {
         const p = pane("a", [false]);
         captureZoomAnchor("a", P, 0);
         p.setZoom(1.1);
+        frame();
         expect(p.adapter.restore).toHaveBeenCalledTimes(1);
         p.setFollowing(true);
         frame();
@@ -162,11 +165,11 @@ describe("restore after a zoom", () => {
         p.setZoom(1.1);
         p.scroller.dispatchEvent(new WheelEvent("wheel", { ctrlKey: true, deltaY: -1 }));
         frame();
-        expect(p.adapter.restore).toHaveBeenCalledTimes(2);
+        expect(p.adapter.restore).toHaveBeenCalledTimes(1);
         p.scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: 40 }));
         frame();
         frame();
-        expect(p.adapter.restore).toHaveBeenCalledTimes(2);
+        expect(p.adapter.restore).toHaveBeenCalledTimes(1);
         p.dispose();
     });
 
@@ -176,14 +179,14 @@ describe("restore after a zoom", () => {
         p.setZoom(1.1);
         p.scroller.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown" }));
         frame();
-        expect(p.adapter.restore).toHaveBeenCalledTimes(1);
+        expect(p.adapter.restore).not.toHaveBeenCalled(); // scrolled before the first pass: nothing to put back
 
         const q = pane("b", [false]);
         captureZoomAnchor("b", P, 0);
         q.setZoom(1.1);
         q.scroller.dispatchEvent(new Event("pointerdown"));
         frame();
-        expect(q.adapter.restore).toHaveBeenCalledTimes(1);
+        expect(q.adapter.restore).not.toHaveBeenCalled();
         p.dispose();
         q.dispose();
     });
@@ -196,7 +199,22 @@ describe("restore after a zoom", () => {
         captureZoomAnchor("a", P, 30); // same gesture
         p.setZoom(1.2);
         expect(p.adapter.capture).toHaveBeenCalledTimes(1);
+        frame();
         expect(p.adapter.restore).toHaveBeenLastCalledWith({ at: "held" });
+        p.dispose();
+    });
+
+    it("several steps of one gesture in a frame are put back once, at that frame", () => {
+        const p = pane("a", [true]);
+        captureZoomAnchor("a", P, 0);
+        p.setZoom(1.1);
+        captureZoomAnchor("a", P, 10);
+        p.setZoom(1.2);
+        captureZoomAnchor("a", P, 20);
+        p.setZoom(1.3);
+        expect(p.adapter.restore).not.toHaveBeenCalled();
+        frame();
+        expect(p.adapter.restore).toHaveBeenCalledTimes(1);
         p.dispose();
     });
 

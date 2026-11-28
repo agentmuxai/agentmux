@@ -23,6 +23,18 @@ vi.mock("@/app/i18n/i18n", () => ({
     t: (key: string) => ({ "zoom.part.fileTree": "File tree", "zoom.part.editor": "Editor" })[key] ?? key,
 }));
 
+// A placement of the amount is a call of zoomIndicatorCenter: counted, and run as it is.
+const placements = vi.hoisted(() => ({ n: 0 }));
+vi.mock("./zoom-indicator-position", async (importOriginal) => {
+    const real = await importOriginal<typeof import("./zoom-indicator-position")>();
+    return {
+        ...real,
+        zoomIndicatorCenter: (...args: Parameters<typeof real.zoomIndicatorCenter>) => {
+            placements.n++;
+            return real.zoomIndicatorCenter(...args);
+        },
+    };
+});
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
 import { registerPaneTab } from "@/app/store/pane-tab-registry";
 import { showZoomIndicator } from "@/app/store/zoom";
@@ -78,5 +90,37 @@ describe("ZoomIndicator", () => {
         showZoomIndicator("110%", "e1");
         expect(host.querySelector(".zoom-indicator-content")?.textContent).toBe("110%");
         expect(host.querySelector(".zoom-indicator-live")?.textContent).toBe("110%");
+    });
+});
+
+/** Lets Solid run the effects a change queued. */
+const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+
+describe("ZoomIndicator placement", () => {
+    it("is measured once a frame, never inside the wheel tick that changed the amount", async () => {
+        const frames: Array<() => void> = [];
+        vi.stubGlobal("requestAnimationFrame", (cb: () => void) => frames.push(cb));
+        vi.stubGlobal("cancelAnimationFrame", () => {});
+        try {
+            mountPane(false);
+            showZoomIndicator("100%", "e1");
+            await tick();
+            for (const frame of frames.splice(0)) frame(); // the first amount is placed; the gesture starts from rest
+            placements.n = 0;
+
+            // Three ticks of one gesture in one frame: nothing is measured inside them.
+            showZoomIndicator("120%", "e1");
+            showZoomIndicator("130%", "e1");
+            showZoomIndicator("140%", "e1");
+            await tick();
+            expect(placements.n).toBe(0);
+            expect(host.querySelector(".zoom-indicator-content")?.textContent).toBe("140%");
+            // The next frame measures once for all three.
+            expect(frames).toHaveLength(1);
+            frames[0]();
+            expect(placements.n).toBe(1);
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 });

@@ -10,7 +10,7 @@ import {
     zoomIndicatorVisibleAtom,
 } from "@/app/store/zoom";
 import { splitSubject } from "@/app/store/zoom-parts";
-import { createEffect, JSX, on, onMount, Show } from "solid-js";
+import { createEffect, JSX, on, onCleanup, onMount, Show } from "solid-js";
 import { paneBodyBox, zoomIndicatorCenter, zoomTargetBox } from "./zoom-indicator-position";
 import "./zoomindicator.scss";
 
@@ -56,7 +56,21 @@ function ZoomIndicatorBox(): JSX.Element {
         box.style.top = `${centre.y}px`;
     };
     onMount(place);
-    createEffect(on([zoomIndicatorTargetAtom, zoomIndicatorTextAtom, zoomIndicatorLabelAtom], place, { defer: true }));
+    // Later changes (each wheel tick of a zoom) are placed once, at the next frame, not inside the tick: the zoom just
+    // changed the pane's size, so measuring it there made the browser lay the page out in the middle of the wheel
+    // listener (28 to 37 ms a tick in the installed build's log), once per tick; a frame has one place to measure.
+    let frame = 0;
+    const placeAtNextFrame = (): void => {
+        if (frame) return;
+        frame = requestAnimationFrame(() => {
+            frame = 0;
+            place();
+        });
+    };
+    onCleanup(() => {
+        if (frame) cancelAnimationFrame(frame);
+    });
+    createEffect(on([zoomIndicatorTargetAtom, zoomIndicatorTextAtom, zoomIndicatorLabelAtom], placeAtNextFrame, { defer: true }));
     // `data-pane-overlay`: over a browser pane's native window too, a hole is cut in it for the amount.
     return (
         <div ref={box} class="zoom-indicator" data-pane-overlay>
