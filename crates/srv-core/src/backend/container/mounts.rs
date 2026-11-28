@@ -55,6 +55,22 @@ fn on_the_key_route(env_vars: &std::collections::HashMap<String, String>) -> boo
 }
 
 impl ContainerMountSpec {
+    /// The host side of every folder this spec binds into the container, besides the container's own copy of the login.
+    pub fn bound_host_dirs(&self) -> Vec<String> {
+        [
+            &self.workspace_host_dir,
+            &self.memory_host_dir,
+            &self.mcp_config_host_dir,
+            &self.github_hooks_host_dir,
+            &self.aws_config_host_dir,
+            &self.aws_tools_host_dir,
+        ]
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect()
+    }
+
     /// What an agent started with `env_vars` in `working_dir` gets mounted: its bound
     /// account's credentials, its workspace, and, for an agent with a Claude config dir,
     /// its Personal Memory. A `~/...` working dir (what `agent.open` records for an agent with
@@ -68,9 +84,10 @@ impl ContainerMountSpec {
         // sign-in that holds is the person's, never the container's. Its memory folder is still shared.
         let login_dir = config_dir.filter(|_| !on_the_key_route(env_vars));
         Self {
-            claude_config_host_dir: login_dir.and_then(super::credentials_dir_if_file_backed),
-            keychain_config_dir: login_dir
-                .filter(|dir| cfg!(target_os = "macos") && !std::path::Path::new(dir).join(CLAUDE_CREDENTIALS_FILE).is_file())
+            // Never the account's own file: the start of the container gives it a copy of its own (`keychain_credentials`).
+            claude_config_host_dir: None,
+            staged_login_config_dir: login_dir
+                .filter(|dir| cfg!(target_os = "macos") || super::credentials_dir_if_file_backed(dir).is_some())
                 .map(str::to_string),
             workspace_host_dir: Some(working_dir.to_string()).filter(|d| !d.is_empty()),
             memory_host_dir: config_dir.and_then(|dir| personal_memory_host_dir(Some(dir), working_dir)),
@@ -144,8 +161,8 @@ impl ContainerManager {
 /// The mounts that make up the agent's home dir inside the container.
 ///
 /// The per-agent named volume stays mounted at [`CONTAINER_CLAUDE_DIR`] exactly
-/// as before, and a bound account contributes ONE extra mount: its
-/// `.credentials.json`, bind-mounted as a single file on top of that volume.
+/// as before, and a bound account contributes ONE extra mount: this container's own
+/// copy of its `.credentials.json`, bind-mounted as a single file on top of that volume.
 ///
 /// Binding the account's whole config dir over `…/.claude` would be the more
 /// obvious shape, and it does NOT work — both failures verified live on
@@ -201,8 +218,9 @@ pub(super) fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec)
             target: Some(format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")),
             source: Some(format!("{}/{CLAUDE_CREDENTIALS_FILE}", host_dir.trim_end_matches('/'))),
             typ: Some(MountTypeEnum::BIND),
-            // Writable: an in-place token refresh should reach the host copy
-            // rather than being silently confined to the container.
+            // Writable: the CLI refreshes its own token. The source is this container's own copy of the account's
+            // login, never the account's file, and a refresh in it is taken back by the account and the other
+            // containers' copies (`keychain_credentials::write_back`).
             read_only: Some(false),
             ..Default::default()
         });
@@ -323,17 +341,17 @@ mod tests {
     }
 
     #[test]
-    fn an_account_with_a_credentials_file_is_mounted_and_one_without_is_left_to_the_keychain_on_macos() {
+    fn an_account_with_a_login_is_given_a_copy_of_it_and_never_its_own_file() {
         let account = tempfile::tempdir().unwrap();
         let env = |dir: &std::path::Path| HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), dir.to_string_lossy().into_owned())]);
         let without = ContainerMountSpec::for_agent(&env(account.path()), "");
         assert_eq!(without.claude_config_host_dir, None);
-        assert_eq!(without.keychain_config_dir.is_some(), cfg!(target_os = "macos"), "only macOS keeps a login outside a file");
+        assert_eq!(without.staged_login_config_dir.is_some(), cfg!(target_os = "macos"), "only macOS keeps a login outside a file");
         std::fs::write(account.path().join(CLAUDE_CREDENTIALS_FILE), "{}").unwrap();
         let with = ContainerMountSpec::for_agent(&env(account.path()), "");
-        assert_eq!(with.claude_config_host_dir.as_deref(), Some(account.path().to_str().unwrap()));
-        assert_eq!(with.keychain_config_dir, None, "a file-backed account is never staged from the Keychain");
-        assert_eq!(ContainerMountSpec::for_agent(&HashMap::new(), "").keychain_config_dir, None, "no bound account, nothing to stage");
+        assert_eq!(with.claude_config_host_dir, None, "the container's own copy is made at its start, so the spec names no file");
+        assert_eq!(with.staged_login_config_dir.as_deref(), Some(account.path().to_str().unwrap()), "the account whose login is copied");
+        assert_eq!(ContainerMountSpec::for_agent(&HashMap::new(), "").staged_login_config_dir, None, "no bound account, nothing to stage");
     }
 
     #[test]
@@ -345,20 +363,20 @@ mod tests {
         let work = tempfile::tempdir().unwrap();
         let mut env = HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), default_dir.path().to_string_lossy().into_owned())]);
         let plan = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
-        assert!(plan.claude_config_host_dir.is_some(), "a plan account's login is mounted");
+        assert!(plan.staged_login_config_dir.is_some(), "a plan account's login is copied for the container");
         let key_token = token::renew_for_account("km-slug", "km-def", KEY_ROUTE_ID, "km-acct", None);
         env.insert("ANTHROPIC_AUTH_TOKEN".to_string(), key_token);
         env.insert("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{PATH_PREFIX}{KEY_ROUTE_ID}"));
         let key = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
         assert_eq!(key.claude_config_host_dir, None, "no credentials file is given to a key agent's container");
-        assert_eq!(key.keychain_config_dir, None, "and no Keychain login is staged for it");
+        assert_eq!(key.staged_login_config_dir, None, "and no login is copied for it");
         assert_eq!(key.memory_host_dir, plan.memory_host_dir, "its Personal Memory folder is shared as before");
         assert!(key.memory_host_dir.is_some());
         // A model route does not make an agent a key agent.
         let mut model = env.clone();
         model.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token::token_for("km-model-slug", "km-model-def", "openrouter"));
         model.insert("ANTHROPIC_BASE_URL".to_string(), format!("http://127.0.0.1:1{PATH_PREFIX}openrouter"));
-        assert!(ContainerMountSpec::for_agent(&model, work.path().to_str().unwrap()).claude_config_host_dir.is_some());
+        assert!(ContainerMountSpec::for_agent(&model, work.path().to_str().unwrap()).staged_login_config_dir.is_some());
         token::revoke("km-model-def", "openrouter");
         token::revoke("km-def", KEY_ROUTE_ID);
     }
@@ -382,7 +400,7 @@ mod tests {
             }
             let plan = ContainerMountSpec::for_agent(&env, work.path().to_str().unwrap());
             assert_eq!(plan.claude_config_host_dir, None, "the person's own sign-in is never mounted for a key agent");
-            assert_eq!(plan.keychain_config_dir, None);
+            assert_eq!(plan.staged_login_config_dir, None);
         }
     }
 

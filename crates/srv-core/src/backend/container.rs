@@ -94,23 +94,21 @@ pub const AGENTMUX_DOCKER_NETWORK: &str = "agentmux-agents";
 /// `docs/reports/REPORT_CONTAINER_AGENT_CREDENTIALS_AND_WORKSPACE_2026_09_02.md`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ContainerMountSpec {
-    /// The bound account's own resolved Claude config dir on the host —
-    /// i.e. whatever `CLAUDE_CONFIG_DIR` the identity resolver produced for this
-    /// agent. Its `.credentials.json` is bind-mounted into the container so the
-    /// CLI there reads the same token the account login wrote (see
-    /// [`agent_home_mounts`] for why it is that one file and not the whole dir).
+    /// The folder holding the container's own copy of the bound account's login: its `.credentials.json` is
+    /// bind-mounted into the container, so the CLI there signs in and refreshes from it (see [`agent_home_mounts`]
+    /// for why it is that one file and not the whole dir). It is never the account's own folder: a container that
+    /// holds the account's own file could empty it for every other container and every host CLI on the account.
+    /// Filled by the start of the container from [`Self::staged_login_config_dir`] (see [`keychain_credentials`]).
     ///
-    /// This is deliberately the ONE account's isolated dir, never the operator's
-    /// global `~/.claude` — reaching into that would be the credential leak the
-    /// named-volume design was avoiding.
-    ///
-    /// `None` keeps the old behavior (an empty per-agent named volume), which is
-    /// correct only for an agent with no bound oauth account.
+    /// `None` keeps the old behavior (an empty per-agent named volume), which is correct only for an agent with
+    /// no bound oauth account.
     pub claude_config_host_dir: Option<String>,
-    /// The bound account's Claude config dir when its login is in the macOS Keychain and not in a file: the
-    /// start of the container stages that login (see [`keychain_credentials`]) and fills
-    /// [`Self::claude_config_host_dir`] with the staging folder. `None` everywhere else.
-    pub keychain_config_dir: Option<String>,
+    /// The bound account's own resolved Claude config dir on the host: whatever `CLAUDE_CONFIG_DIR` the identity
+    /// resolver produced for this agent, never the operator's global `~/.claude`. The start of the container stages
+    /// the account's login (from its file, or on macOS from the Keychain) as a copy for this container alone, and
+    /// fills [`Self::claude_config_host_dir`] with the staging folder. `None` for an agent with no bound account
+    /// login, and for one on an API key.
+    pub staged_login_config_dir: Option<String>,
     /// The agent's working directory on the host, bind-mounted at
     /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
     /// is what shipped before this existed.
@@ -155,7 +153,7 @@ pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
 ///
 /// Returning `None` degrades to an empty per-agent volume and logs why. On macOS the
 /// container's start then stages the account's Keychain login instead (see
-/// [`ContainerMountSpec::keychain_config_dir`] and `keychain_credentials`).
+/// [`ContainerMountSpec::staged_login_config_dir`] and `keychain_credentials`).
 pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
     if claude_config_host_dir.is_empty() {
         return None;
@@ -556,7 +554,7 @@ impl ContainerManager {
                     tracing::info!(container = container_name, reason, "container spec drift detected — recreating");
                     let _ = self.stop(container_name, 10).await;
                     self.remove(container_name, true).await?;
-                    self.restage_keychain_login(container_name, spec).await;
+                    self.restage_login(container_name, spec).await;
                     None
                 }
                 None => Some(status),
@@ -1055,7 +1053,7 @@ impl ContainerManager {
         use bollard::container::RemoveContainerOptions;
         key_route::revoke_container_tokens(container_name);
         // A login the container refreshed goes back to the Keychain while the container is still there to ask.
-        self.write_back_keychain_login(container_name).await;
+        self.write_back_login(container_name).await;
         self.inner.docker
             .remove_container(container_name, Some(RemoveContainerOptions {
                 force,
@@ -1063,7 +1061,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
-        self.drop_staged_keychain_login(container_name).await;
+        self.drop_staged_login(container_name).await;
         self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())

@@ -125,7 +125,7 @@ mod tests {
             github_hooks_host_dir: None,
             aws_config_host_dir: None,
             aws_tools_host_dir: None,
-            keychain_config_dir: None,
+            staged_login_config_dir: None,
             limits: Default::default(),
         };
         let reported = |source: &str| match source.split_once(":/") {

@@ -78,7 +78,7 @@ mod tests {
         use crate::backend::container::{cli_dir_mount, mounts::agent_home_mounts, ContainerMountSpec};
         let spec = ContainerMountSpec {
             claude_config_host_dir: Some("/home/u/.claude-acct".to_string()),
-            keychain_config_dir: Some("/tmp/staged".to_string()),
+            staged_login_config_dir: Some("/tmp/staged".to_string()),
             workspace_host_dir: Some("/home/u/work".to_string()),
             ..Default::default()
         };
