@@ -166,6 +166,21 @@ fn a_sweep_that_is_not_enabled_removes_nothing() {
 }
 
 #[test]
+fn a_sweep_reads_only_the_store_it_is_given_and_none_is_swept_without_a_global_store() {
+    let e = Env::new();
+    let a = e.start(1_000, SID1, &e.config);
+    e.end(&a, 2_000);
+    e.start(3_000, SID2, &e.config);
+    e.put(SID1, "old");
+    // The per-channel store holds none of the segment logs: a sweep over it finds nothing to end.
+    let channel = FileStore::open_in_memory().unwrap();
+    assert_eq!(sweep(&channel, &e.roots, &on(7), later()), Report { agents: 0, ..Report::default() });
+    assert!(e.file(SID1).exists());
+    // No global store is installed in a unit test: the production entry point sweeps nothing.
+    assert_eq!(sweep_global(&e.roots, &on(7), later()), None);
+}
+
+#[test]
 fn a_sweep_removes_the_session_the_store_holds_and_keeps_the_current_one() {
     let e = Env::new();
     let a = e.start(1_000, SID1, &e.config);

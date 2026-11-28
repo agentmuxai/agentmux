@@ -219,6 +219,13 @@ pub fn sweep(fs: &FileStore, roots: &Roots, policy: &Policy, now_ms: i64) -> Rep
     report
 }
 
+/// [`sweep`] over the global transcript store, where the segment logs, the conversation zones and the agent's provider
+/// zone live (the per-channel store holds none of them). `None` when there is no global store: nothing is swept then.
+pub fn sweep_global(roots: &Roots, policy: &Policy, now_ms: i64) -> Option<Report> {
+    let global = crate::backend::agent_session::global_transcript_store()?;
+    Some(sweep(global, roots, policy, now_ms))
+}
+
 #[cfg(test)]
 #[path = "provider_sessions_tests.rs"]
 mod tests;
