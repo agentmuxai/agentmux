@@ -124,7 +124,7 @@ listing "AgentMux_0.60.2_amd64.deb" "$(sha "$deb")"
 for f in envelope.json envelope.json.sig manifest.json; do printf 'signed %s' "$f" > "$TMP/signed/AgentMux-0.60.2-$f"; done
 verify 0
 FAKE_OWNER=deb run "$deb" 0.60.2 $dead_pid; st=$?
-if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install' "$TMP/log" && ! grep -q 'api\|releases/tags' "$TMP/curl.log" \
+if [ $st = 0 ] && grep -q '^READY$' "$TMP/out" && grep -q 'apt-get install' "$TMP/log" && ! grep -q 'api\.github\.com\|releases/tags' "$TMP/curl.log" \
     && grep -q "download/v0.60.2/AgentMux-0.60.2-envelope.json\$" "$TMP/curl.log" && grep -q "download/v0.60.2/AgentMux-0.60.2-manifest.json\$" "$TMP/curl.log" \
     && grep -q -e "^--verify-update|0.60.2|.*/signed|.*/AgentMux_0.60.2_amd64.deb|installed:0.60.1|\$" "$TMP/verify.args"; then
     ok "a signed release: its files are fetched, the launcher verifies, GitHub's listing is not read, installed"
