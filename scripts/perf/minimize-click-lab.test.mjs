@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { summarizeClick, tableOf, topSelf } from "./minimize-click-lab.mjs";
+import { callersOf, summarizeClick, tableOf, topSelf } from "./minimize-click-lab.mjs";
 
 describe("summarizeClick", () => {
     const click = { name: "click", start: 1000, procStart: 1180, procEnd: 1200, dur: 280 };
@@ -68,5 +68,46 @@ describe("tableOf", () => {
         const rows = tableOf({ before: { "chip-busy": [run(300), run(100), run(200), run(null, false)] }, after: { "chip-busy": [run(50)] } });
         expect(rows[0]).toMatchObject({ variant: "before", case: "chip-busy", runs: "3/4", inputDelay: 200 });
         expect(rows[1]).toMatchObject({ variant: "after", runs: "1/1", inputDelay: 50 });
+    });
+});
+
+describe("callersOf", () => {
+    const f = (functionName, url = "http://x/app/a.ts", lineNumber = 0) => ({ functionName, url, lineNumber });
+    // click -> pillRects -> getBoundingClientRect ; click -> updateTree -> getBoundingClientRect ; click -> updateTree -> updateTree
+    const profile = {
+        nodes: [
+            { id: 1, callFrame: f("(root)", ""), children: [2] },
+            { id: 2, callFrame: f("click", "http://x/layout/lib/node.ts", 4), children: [3, 5] },
+            { id: 3, callFrame: f("pillRects", "http://x/layout/lib/merge.ts", 36), children: [4] },
+            { id: 4, callFrame: f("getBoundingClientRect", ""), children: [] },
+            { id: 5, callFrame: f("updateTree", "http://x/layout/lib/geometry.ts", 9), children: [6, 7] },
+            { id: 6, callFrame: f("getBoundingClientRect", ""), children: [] },
+            { id: 7, callFrame: f("updateTree", "http://x/layout/lib/geometry.ts", 9), children: [] },
+        ],
+        samples: [4, 6, 6, 7, 1],
+        timeDeltas: [10000, 20000, 30000, 40000, 50000],
+    };
+
+    it("adds a function's time once per sample, however often it recurs, and leaves the root and idle out", () => {
+        const { inclusive } = callersOf(profile);
+        expect(inclusive.find((x) => x.fn.startsWith("click "))?.ms).toBe(100);
+        expect(inclusive.find((x) => x.fn.startsWith("updateTree "))?.ms).toBe(90);
+        expect(inclusive.some((x) => x.fn.startsWith("(root)"))).toBe(false);
+    });
+
+    it("names the script function that asked for each layout read", () => {
+        const { readers } = callersOf(profile);
+        expect(readers).toEqual([
+            { read: "getBoundingClientRect <- updateTree lib/geometry.ts:10", ms: 50 },
+            { read: "getBoundingClientRect <- pillRects lib/merge.ts:37", ms: 10 },
+        ]);
+    });
+
+    it("keeps only the samples in the window, and copes with no profile", () => {
+        expect(callersOf(profile, { windowMs: 30 }).readers).toEqual([
+            { read: "getBoundingClientRect <- updateTree lib/geometry.ts:10", ms: 20 },
+            { read: "getBoundingClientRect <- pillRects lib/merge.ts:37", ms: 10 },
+        ]);
+        expect(callersOf(null)).toEqual({ inclusive: [], readers: [] });
     });
 });

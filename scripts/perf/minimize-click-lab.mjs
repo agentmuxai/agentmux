@@ -121,6 +121,60 @@ export function topSelf(profile, n = 12) {
   return [...byFn].sort((a, b) => b[1] - a[1]).slice(0, n).map(([fn, ms]) => ({ fn, ms: Math.round(ms * 10) / 10 }));
 }
 
+/** Layout and style reads: the native calls that force the page to compute before they answer. */
+const READS = new Set(["getBoundingClientRect", "getPropertyValue", "getComputedStyle", "getClientRects", "checkVisibility", "querySelector", "querySelectorAll", "scrollIntoView", "focus", "getBBox", "elementFromPoint"]);
+const NOT_A_CALLER = new Set(["(root)", "(program)", "(idle)", "(garbage collector)"]);
+const fnKey = (f) => `${f.functionName || "(anonymous)"} ${(f.url || "").split("/").slice(-2).join("/")}:${(f.lineNumber ?? 0) + 1}`;
+
+/**
+ * Where the main thread's time goes by caller, from a cpuprofile of the Chrome DevTools protocol. `topSelf` says which
+ * function had the time; this says who was on the stack.
+ *   inclusive: per function, the ms in which it was anywhere on the stack (a function counts once per sample, however
+ *     often it recurs), the `n` largest. A function the page's own code calls shows here with everything below it.
+ *   readers: per layout or style read (getBoundingClientRect and the like), the nearest caller that has a script file, with
+ *     the self ms of the read, the `n` largest. This is what attributes a read to the code that asked for it.
+ * `windowMs` keeps only the samples in the first windowMs of the profile (the click and what follows at once).
+ */
+export function callersOf(profile, { n = 12, windowMs = Infinity } = {}) {
+  const nodes = new Map((profile?.nodes ?? []).map((x) => [x.id, x]));
+  const parent = new Map();
+  for (const x of nodes.values()) for (const c of x.children ?? []) parent.set(c, x.id);
+  const inclusive = new Map();
+  const readers = new Map();
+  const samples = profile?.samples ?? [];
+  const deltas = profile?.timeDeltas ?? [];
+  let at = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const us = deltas[i] ?? 0;
+    at += us;
+    if (at / 1000 > windowMs) break;
+    const stack = [];
+    for (let id = samples[i]; id !== undefined; id = parent.get(id)) {
+      const f = nodes.get(id)?.callFrame;
+      if (f) stack.push(f);
+    }
+    if (!stack.length || NOT_A_CALLER.has(stack[0].functionName)) continue;
+    const seen = new Set();
+    for (const f of stack) {
+      if (NOT_A_CALLER.has(f.functionName)) continue;
+      const k = fnKey(f);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      inclusive.set(k, (inclusive.get(k) ?? 0) + us / 1000);
+    }
+    if (READS.has(stack[0].functionName)) {
+      const caller = stack.slice(1).find((f) => f.url);
+      const k = `${stack[0].functionName} <- ${caller ? fnKey(caller) : "(no script caller)"}`;
+      readers.set(k, (readers.get(k) ?? 0) + us / 1000);
+    }
+  }
+  const top = (m) => [...m].sort((a, b) => b[1] - a[1]).slice(0, n);
+  return {
+    inclusive: top(inclusive).map(([fn, ms]) => ({ fn, ms: Math.round(ms * 10) / 10 })),
+    readers: top(readers).map(([read, ms]) => ({ read, ms: Math.round(ms * 10) / 10 })),
+  };
+}
+
 const median = (xs) => {
   const v = xs.filter((x) => x != null).sort((a, b) => a - b);
   return v.length ? v[Math.floor(v.length / 2)] : null;
@@ -226,7 +280,7 @@ async function clickOnce(d, blockId, chip, restMs = 0, control = ".block-frame-m
   await sleep(WATCH_MS);
   const { profile } = await d.session.send("Profiler.stop");
   const raw = await d.eval(`window.__minLab.read()`);
-  return { click: summarizeClick(raw), top: topSelf(profile) };
+  return { click: summarizeClick(raw), top: topSelf(profile), callers: callersOf(profile, { n: 15 }), callers1s: callersOf(profile, { n: 15, windowMs: 1000 }) };
 }
 
 /** Gives `n` agents a turn and lets their panes start streaming. */
