@@ -486,3 +486,30 @@ fn a_task_claimed_on_the_work_store_is_in_the_packet_of_a_retried_resume() {
     let packet = c.carry_continuation().expect("the pane's record is carried");
     assert!(packet.contains("Finish the retried resume check"), "{packet}");
 }
+
+/// A jekt to a stopped agent starts its turn on the thread that is delivering it, under the reactive
+/// handler's lock (`bootstrap/delivery.rs`). When the agent starts without a session to resume and the pane
+/// has history, the spawn builds the packet there. Building it must not wait for that lock: it is a plain
+/// mutex, so a thread that holds it and asks again waits for itself, and every later message, health probe
+/// and status call waits behind it until srv is killed (#48776, #48562).
+#[test]
+fn carrying_the_record_never_waits_on_the_handler_lock_the_caller_holds() {
+    let store = store_with_resume_failed(BANNER_BLOCK);
+    let mut block: crate::backend::obj::Block = store.get(BANNER_BLOCK).unwrap().unwrap();
+    block.meta.insert("agentId".to_string(), serde_json::json!("Held-p48776"));
+    store.update(&mut block).unwrap();
+    let fs = Arc::new(FileStore::open_in_memory().unwrap());
+    fs.make_file(BANNER_BLOCK, PERSISTENT_OUTPUT_SUBJECT, FileMeta::new(), FileOpts::default()).unwrap();
+    fs.write_file(BANNER_BLOCK, PERSISTENT_OUTPUT_SUBJECT, &stream(&[r#"{"type":"user","message":{"role":"user","content":"earlier request"}}"#])).unwrap();
+    let c = banner_controller(&store, fs);
+    let (tx, rx) = std::sync::mpsc::channel();
+    // On a thread of its own: a regression leaves it waiting for itself for good, which the timeout reports.
+    std::thread::spawn(move || {
+        let _held = crate::backend::reactive::get_global_handler().hold_lock_for_test();
+        let _ = tx.send(c.carry_continuation().is_some());
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(20)) {
+        Ok(carried) => assert!(carried, "the record is still carried when the handler is busy"),
+        Err(_) => panic!("carry_continuation waited on the reactive handler lock its own thread holds"),
+    }
+}
