@@ -143,7 +143,7 @@ pub(super) async fn float(state: &AppState, agent: &str, req: &PanePlaceRequest)
 }
 
 /// Float the docked pane `target`, which `agent` opened: the answer of a `float` call, or the status and text it is
-/// refused with. The browser handoff floats the pane the person is asked to work in through this too.
+/// refused with. A browser's page is made again in the new window, so it reloads at its address.
 pub(crate) async fn float_pane(
     state: &AppState,
     agent: &str,
@@ -202,24 +202,6 @@ pub(crate) async fn float_pane(
         body["queued"] = json!(true);
     }
     Ok(body)
-}
-
-/// A browser handoff: the pane the person is asked to work in comes to them in a window of its own when the calling
-/// agent opened it and left it docked (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §4, choice 1). It
-/// goes where an open's default puts a floating browser. Best effort: a refusal (the cap of four, the shared rate
-/// limit) leaves the pane where it is, and the banner shows there. Whether the pane was floated.
-pub(crate) async fn float_for_handoff(state: &AppState, agent: Option<&str>, pane: &str) -> bool {
-    let Some(agent) = agent else { return false };
-    if !super::pane_openers::opened_by(pane, agent) || super::pane_openers::is_floating(pane) {
-        return false;
-    }
-    match float_pane(state, agent, pane, &Default::default()).await {
-        Ok(_) => true,
-        Err((status, why)) => {
-            tracing::info!(pane = %pane, %status, "browser handoff: the pane stays docked: {why}");
-            false
-        }
-    }
 }
 
 #[cfg(test)]

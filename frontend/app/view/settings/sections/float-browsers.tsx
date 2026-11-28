@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Settings → Agents → Browser windows: the switch that makes every browser an agent opens float in a window of its
-// own (`agent:floatbrowsers`, docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §4). Off by default. A
-// browser an agent hands to the person floats whatever this says; an agent's own `floating` or `split` wins.
+// own (`agent:floatbrowsers`, docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §4). Off by default. An
+// agent's own `floating` or `split` wins.
 
 import type { JSX } from "solid-js";
 

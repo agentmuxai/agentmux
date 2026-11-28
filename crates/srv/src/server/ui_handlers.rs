@@ -1129,7 +1129,6 @@ pub(crate) async fn handle_ui_browser_handoff(
         return err_response(StatusCode::SERVICE_UNAVAILABLE, e);
     }
     let minutes = req.timeout_minutes.unwrap_or(15).clamp(1, 60);
-    crate::server::pane_dock::float_for_handoff(&state, caller.as_ref().and_then(|c| c.0.uid()), &banner_at).await;
     let watch = crate::server::browser_attached::Watch::begin(&state, &block_id).await;
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser hand-off");
     let raised = match crate::server::browser_attention::raise(
