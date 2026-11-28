@@ -1368,6 +1368,12 @@
           "description": "Let agents start other agents (workers, or a new agent in My Agents) without showing you a notice first. Off by default: the first time an agent starts one, its pane shows a card with a 30 second countdown that goes ahead on its own, with Stop it, Start now and Always allow this agent. Turn this on to skip the card for every agent. See docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md.",
           "x-section": "Agents"
         },
+        "agent:floatbrowsers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open every browser an agent opens in a floating window of its own, when the agent does not say where it goes. Off by default: an agent's first browser opens in a pane below its own, and later ones are tabs of it. An agent that asks for floating: false, a split or a place keeps its choice; at most 4 floating panes per agent, then the next one opens docked. See docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md.",
+          "x-section": "Agents"
+        },
         "agent:transcriptsinglecopy": {
           "type": "boolean",
           "default": false,

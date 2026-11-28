@@ -752,6 +752,7 @@ pub(crate) async fn handle_ui_browser_open(
     if let Err(e) = crate::server::app_api::floater_place::for_browser(&mut cmd, &req, caller.as_ref().map(|c| &c.0)) {
         return err_response(StatusCode::BAD_REQUEST, e);
     }
+    crate::server::app_api::floater_place::float_by_setting(&state, &mut cmd, req.floating).await;
     let opener = cmd.opener.clone();
     crate::server::app_api::agent_tab_default::apply(&state, true, opener.as_deref(), &mut cmd);
     let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {

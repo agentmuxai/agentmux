@@ -1338,6 +1338,7 @@ declare global {
         "agent:mcpselfheal"?: boolean;
         "agent:outdatedidsnotice"?: boolean;
         "agent:maystartagents"?: boolean;
+        "agent:floatbrowsers"?: boolean;
         "agent:transcriptsinglecopy"?: boolean;
         "desktop:enabled"?: boolean;
         "desktop:blocklist"?: string[];

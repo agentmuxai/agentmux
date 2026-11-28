@@ -47,6 +47,14 @@ pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
     let blocks = store.get_all::<Block>().unwrap_or_default();
 
     let panes_of = |tab: &Tab| -> Vec<serde_json::Value> {
+        // What fraction of the tab each docked pane has (`pane_share`).
+        let shares = store
+            .get::<LayoutState>(&tab.layoutstate)
+            .ok()
+            .flatten()
+            .and_then(|l| l.rootnode)
+            .map(|root| super::pane_share::shares(&root))
+            .unwrap_or_default();
         tab.blockids
             .iter()
             .filter_map(|bid| blocks.iter().find(|b| &b.oid == bid))
@@ -56,6 +64,9 @@ pub(crate) fn agent_layout(store: &Store) -> serde_json::Value {
                     "view": meta_get_string(&b.meta, "view", ""),
                     "title": meta_get_string(&b.meta, "frame:title", ""),
                 });
+                if let Some(share) = shares.get(&b.oid) {
+                    pane["share"] = json!(super::pane_share::rounded(*share));
+                }
                 // A hibernated browser pane: its page reloads on the next
                 // Browser call (SPEC_BROWSER_PANE_HIBERNATION_2026_10_20.md).
                 if b

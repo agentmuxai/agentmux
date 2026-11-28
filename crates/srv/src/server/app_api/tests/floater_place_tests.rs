@@ -139,3 +139,18 @@ async fn a_forgotten_wait_takes_no_answer() {
     forget("fp-2");
     assert!(!answered("fp-2", Err("too late".into())));
 }
+
+#[test]
+fn the_setting_floats_a_browser_that_names_no_place_and_leaves_every_other_open_alone() {
+    // On, nothing said, room to spare: it floats.
+    assert!(float_default(true, None, false, 0));
+    assert!(float_default(true, None, false, MAX_FLOATERS - 1));
+    // Off: never.
+    assert!(!float_default(false, None, false, 0));
+    // `floating: false` and a split are the agent saying where it goes; `floating: true` is already floating.
+    assert!(!float_default(true, Some(false), false, 0));
+    assert!(!float_default(true, Some(true), false, 0));
+    assert!(!float_default(true, None, true, 0));
+    // At the cap it opens docked rather than being refused.
+    assert!(!float_default(true, None, false, MAX_FLOATERS));
+}

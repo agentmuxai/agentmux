@@ -136,36 +136,45 @@ pub(super) async fn dock(state: &AppState, agent: &str, req: &PanePlaceRequest) 
 /// `float`: a docked pane the caller opened gets a window of its own, placed as an open's `floating` places one
 /// (the same size, spot, x and y; none gives the default, a browser's 1040 x 760 flush right).
 pub(super) async fn float(state: &AppState, agent: &str, req: &PanePlaceRequest) -> Response {
-    let target = req.target_id.as_str();
+    match float_pane(state, agent, &req.target_id, &req.place).await {
+        Ok(body) => (StatusCode::OK, Json(body)).into_response(),
+        Err((status, text)) => refuse(status, text),
+    }
+}
+
+/// Float the docked pane `target`, which `agent` opened: the answer of a `float` call, or the status and text it is
+/// refused with. A browser's page is made again in the new window, so it reloads at its address.
+pub(crate) async fn float_pane(
+    state: &AppState,
+    agent: &str,
+    target: &str,
+    place: &agentmux_common::place_args::PlaceArgs,
+) -> Result<serde_json::Value, (StatusCode, String)> {
     let mut cmd = CommandPaneOpenData {
         floating: Some(true),
         opener: Some(agent.to_string()),
-        width: req.place.width.clone(),
-        height: req.place.height.clone(),
-        spot: req.place.spot.clone(),
-        x: req.place.x,
-        y: req.place.y,
+        width: place.width.clone(),
+        height: place.height.clone(),
+        spot: place.spot.clone(),
+        x: place.x,
+        y: place.y,
         ..Default::default()
     };
-    if let Err(e) = floater_place::check(&cmd) {
-        return refuse(StatusCode::BAD_REQUEST, e);
-    }
+    floater_place::check(&cmd).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     if !super::pane_openers::opened_by(target, agent) {
-        return refuse(StatusCode::FORBIDDEN, super::pane_place::NOT_YOURS);
+        return Err((StatusCode::FORBIDDEN, super::pane_place::NOT_YOURS.to_string()));
     }
     if super::pane_openers::is_floating(target) {
-        return refuse(StatusCode::CONFLICT, format!("NOT_DOCKED: {target} is already a floating window: use resize, move or place"));
+        return Err((StatusCode::CONFLICT, format!("NOT_DOCKED: {target} is already a floating window: use resize, move or place")));
     }
     let Some((src_tab, src_ws)) = home_of(state, target).await else {
-        return refuse(StatusCode::NOT_FOUND, format!("that pane is gone: {target} is no longer in a tab"));
+        return Err((StatusCode::NOT_FOUND, format!("that pane is gone: {target} is no longer in a tab")));
     };
     let open = floater_place::live_floaters(state, agent).await;
     if open.len() >= floater_place::MAX_FLOATERS {
-        return refuse(StatusCode::TOO_MANY_REQUESTS, floater_place::limit_text(&open));
+        return Err((StatusCode::TOO_MANY_REQUESTS, floater_place::limit_text(&open)));
     }
-    if let Err(text) = super::deeplink_guard::check_place_rate(agent) {
-        return refuse(StatusCode::TOO_MANY_REQUESTS, text);
-    }
+    super::deeplink_guard::check_place_rate(agent).map_err(|text| (StatusCode::TOO_MANY_REQUESTS, text))?;
     let view = state.mstore.get::<Block>(target).ok().flatten().map(|b| crate::backend::obj::meta_get_string(&b.meta, "view", "")).unwrap_or_default();
     if view == "browser" {
         cmd.floater_max_share = floater_place::browser_defaults(&mut cmd);
@@ -173,14 +182,14 @@ pub(super) async fn float(state: &AppState, agent: &str, req: &PanePlaceRequest)
     let call = service_call("TearOffBlock", vec![json!(target), json!(src_tab), json!(src_ws)]);
     let ret = crate::server::service::handle_tear_off_block(state, &call).await;
     if let Some(e) = ret.error {
-        return refuse(StatusCode::BAD_GATEWAY, format!("the pane could not be floated: {e}"));
+        return Err((StatusCode::BAD_GATEWAY, format!("the pane could not be floated: {e}")));
     }
     if let Some(updates) = &ret.updates {
         // The tear-off's updates reach only a window that asked; the others learn of the new workspace here.
         state.event_bus.broadcast_mux_obj_updates(updates);
     }
     let Some(new_ws) = ret.data.as_ref().and_then(|d| d.as_str()).map(str::to_string) else {
-        return refuse(StatusCode::BAD_GATEWAY, "the pane could not be floated: no workspace was made for it");
+        return Err((StatusCode::BAD_GATEWAY, "the pane could not be floated: no workspace was made for it".to_string()));
     };
     super::pane_openers::set_floating(target, true);
     let mut result = PaneOpenResult::docked(target.to_string(), String::new(), view, false);
@@ -192,7 +201,7 @@ pub(super) async fn float(state: &AppState, agent: &str, req: &PanePlaceRequest)
     if result.queued {
         body["queued"] = json!(true);
     }
-    (StatusCode::OK, Json(body)).into_response()
+    Ok(body)
 }
 
 #[cfg(test)]
