@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.60.45 — 2026-11-27
+
+- Tidy Vault imports and documentation after obsolete card removal
+- history: the compact form's rules and checks as a pure module (stream fragments of a complete reply, interrupted replies, and checks L1 to L4); nothing calls it yet, and the spec lands with it
+- history: new agent output holds a reply's streaming fragments in a live file, not in the transcript; a cut-off reply is kept as one interrupted line and a kill is recovered at the next start
+- Windows releases keep the debug symbols (a PDB per version, never shipped), so a crash or freeze dump of the AgentMux background service shows function names
+- srv no longer freezes when a message starts a stopped agent that has history: building its continuation packet waited on the message handler's lock its own thread held
+
 ## 0.60.44 — 2026-11-27
 
 - Selecting text no longer stalls the first move of a drag: the selection guards stop restyling the whole page (the field keeps the pointer by capture, the rest of a pane drag is switched off a few roots at a time), and each drag logs its lag (#48733)
