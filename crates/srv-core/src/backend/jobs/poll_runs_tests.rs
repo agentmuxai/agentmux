@@ -337,13 +337,11 @@ async fn api_questions_are_asked_together_but_only_a_few_at_once() {
     };
     let mut state = PollState::default();
     let t0 = agentmux_common::time::now_ms();
-    let started = std::time::Instant::now();
     poll::poll_due_of(poll::PollKind::Api, &rig.sched, &all, &check, &mut state, t0).await;
-    let took = started.elapsed();
     use std::sync::atomic::Ordering::SeqCst;
     assert_eq!(asked.load(SeqCst), 10, "every due question is asked");
+    // Together and not all at once: the peak in flight is the bound (asked one after another it would be 1). No wall-clock bound: a loaded host stretches 40 ms sleeps.
     assert_eq!(peak.load(SeqCst), poll::API_ASKS_AT_ONCE, "a few at once, and no more than the bound");
-    assert!(took < std::time::Duration::from_millis(40 * 10), "ten answers of 40 ms took {took:?}: asked one after another");
 }
 
 /// A site that never answers does not hold up a local poll due in the same moment: the `api` pass is its own, so the local

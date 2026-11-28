@@ -561,7 +561,7 @@ pub(crate) async fn identity_account_validate_stored_impl<'o>(
     }
     let (aid, secret_ref, vault) = (account_id.to_string(), acct.secret_ref.clone(), state.identity_store.clone());
     let plaintext = tokio::task::spawn_blocking(move || match &secret_ref {
-        crate::backend::storage::identities::SecretRef::Vault { entry } => crate::backend::vault::account_key::read(&vault, entry),
+        crate::backend::storage::identities::SecretRef::Vault { .. } => crate::backend::vault::account_key::read(&vault, &aid, &secret_ref),
         _ => crate::identity::secret_store::get(&aid),
     })
     .await.map_err(|e| format!("identity.account.validate: key task: {e}"))?

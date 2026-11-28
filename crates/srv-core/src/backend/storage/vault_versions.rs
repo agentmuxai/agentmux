@@ -127,8 +127,17 @@ impl Store {
     /// replaces) in the same transaction. False, with nothing written, if the entry
     /// changed or is gone.
     pub fn vault_update_kept(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: Option<&VaultVersionRow>) -> Result<bool, StoreError> {
+        self.vault_update_kept_bound(row, was, was_fields, kept, None)
+    }
+
+    pub fn vault_update_kept_bound(&self, row: &super::vault::VaultRow, was: &[u8], was_fields: &str, kept: Option<&VaultVersionRow>, link_id: Option<&str>) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
+        if let Some(link_id) = link_id {
+            if !super::vault_account_key::matches_link(&tx, &row.id, link_id)? {
+                return Ok(false);
+            }
+        }
         let n = tx.execute(
             "UPDATE db_vault_entries SET label = ?2, fields = ?3, tags = ?4, sealed = ?5, updated_at = ?6 WHERE id = ?1 AND created_at = ?7 AND sealed = ?8 AND fields = ?9",
             params![row.id, row.label, row.fields, row.tags, row.sealed, row.updated_at, row.created_at, was, was_fields],
