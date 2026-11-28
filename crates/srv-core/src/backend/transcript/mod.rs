@@ -23,3 +23,5 @@ pub mod withhold;
 pub mod withhold_sources;
 #[cfg(test)]
 mod withhold_sources_tests;
+#[cfg(test)]
+mod history_guarantee_tests;

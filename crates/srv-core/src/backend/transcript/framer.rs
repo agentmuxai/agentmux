@@ -61,7 +61,23 @@ pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
 /// Whether the framer runs (`agent:transcriptframes`): unset means on, only an
 /// explicit `false` turns it off.
 pub fn enabled() -> bool {
+    #[cfg(test)]
+    if FRAMES_OFF_FOR_TEST.with(std::cell::Cell::get) {
+        return false;
+    }
     on_unless_false(CONFIG.get().and_then(|c| c.extra_bool(SETTING_FRAMES)))
+}
+
+#[cfg(test)]
+thread_local! {
+    static FRAMES_OFF_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A test's switch: with it on this thread's framer is off, so the store's own bytes can be scanned for a marker
+/// (`history_guarantee_tests`, spec 13).
+#[cfg(test)]
+pub(crate) fn set_frames_off_for_test(off: bool) {
+    FRAMES_OFF_FOR_TEST.with(|c| c.set(off));
 }
 
 fn on_unless_false(setting: Option<bool>) -> bool {
