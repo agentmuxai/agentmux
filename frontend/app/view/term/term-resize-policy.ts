@@ -56,9 +56,17 @@ const LIVE_REFITS_PER_FRAME = 2;
  * (ANALYSIS_MACOS_WINDOW_PAINT_2026_10_10.md §6.1). Each refit spends its
  * measured time from a credit that grows by this share of the elapsed time,
  * and a refit starts only while the credit is positive: cheap refits still
- * run `LIVE_REFITS_PER_FRAME` a frame, costly ones about one every other frame.
+ * run `LIVE_REFITS_PER_FRAME` a frame, costly ones about one every few frames.
+ *
+ * 8%, down from 25%: with ten terminals open a window drag spent ~350 ms of every
+ * 1.8 s in refits at 25% and drew about 83% of its frames; at 8% the refits took
+ * ~130 ms and 96% of the frames were drawn (six runs each, alternated, on one host).
+ * The grids follow a drag a little less closely, and the ones still waiting when it
+ * stops are all refitted once it has been quiet for `LIVE_REFIT_QUIET_MS`.
  */
-const LIVE_REFIT_TIME_SHARE = 0.25;
+const LIVE_REFIT_TIME_SHARE = 0.08;
+/** When no refit has been asked for this long, the drag is over: every waiting refit runs at once, whatever the credit. */
+export const LIVE_REFIT_QUIET_MS = 80;
 /** The most credit that builds up while nothing refits: about one frame's share at 60 Hz. */
 const LIVE_REFIT_MAX_CREDIT_MS = 4;
 
@@ -74,14 +82,29 @@ export interface RefitScheduler {
  * they're asked for while their time credit lasts (`LIVE_REFIT_TIME_SHARE`),
  * the rest wait for the next frames in arrival order. A waiting job is
  * replaced by a newer one for the same key, keeping its place, and runs then,
- * so it measures the size of that frame.
+ * so it measures the size of that frame. Once nothing has been scheduled for
+ * `LIVE_REFIT_QUIET_MS`, the rest run at once: a drag always ends on the exact size.
  */
 export function createRefitScheduler(
     perFrame: number,
     requestFrame: (cb: () => void) => void = (cb) => requestAnimationFrame(cb),
-    now: () => number = () => performance.now()
+    now: () => number = () => performance.now(),
+    setTimer: (cb: () => void, ms: number) => unknown = (cb, ms) => setTimeout(cb, ms),
+    clearTimer: (handle: unknown) => void = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
 ): RefitScheduler {
     const waiting = new Map<object, () => void>();
+    let quietTimer: unknown;
+    const flushWhenQuiet = () => {
+        if (quietTimer !== undefined) clearTimer(quietTimer);
+        quietTimer = setTimer(() => {
+            quietTimer = undefined;
+            // A job may schedule again (the long-buffer column throttle does): the loop visits that too.
+            for (const [key, job] of waiting) {
+                waiting.delete(key);
+                job();
+            }
+        }, LIVE_REFIT_QUIET_MS);
+    };
     let ranThisFrame = 0;
     let frameRequested = false;
     let credit = LIVE_REFIT_MAX_CREDIT_MS;
@@ -127,6 +150,7 @@ export function createRefitScheduler(
     return {
         schedule(key, job) {
             waiting.set(key, job);
+            flushWhenQuiet();
             if (!draining) drain();
         },
         cancel(key) {
