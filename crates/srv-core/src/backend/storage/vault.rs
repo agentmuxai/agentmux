@@ -246,9 +246,9 @@ fn activity_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultActivityRow> {
     })
 }
 
-const COLUMNS: &str = "id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at, vault_id";
+pub(super) const COLUMNS: &str = "id, kind, label, fields, tags, sealed, created_at, updated_at, last_used_at, vault_id";
 
-fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultRow> {
+pub(super) fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultRow> {
     Ok(VaultRow {
         id: r.get(0)?,
         kind: r.get(1)?,
@@ -269,11 +269,24 @@ fn vault_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<VaultInfoRow> {
 
 impl Store {
     pub fn vault_insert(&self, row: &VaultRow) -> Result<(), StoreError> {
+        self.vault_insert_bound(row, None)
+    }
+
+    pub fn vault_insert_bound(&self, row: &VaultRow, link_id: Option<&str>) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
             &format!("INSERT INTO db_vault_entries ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"),
             params![row.id, row.kind, row.label, row.fields, row.tags, row.sealed, row.created_at, row.updated_at, row.last_used_at, row.vault_id],
         )?;
+        if let Some(link_id) = link_id {
+            let inserted = tx.execute(
+                "INSERT INTO db_vault_link_ids (entry_id, link_id) SELECT ?1, ?2 WHERE NOT EXISTS(SELECT 1 FROM db_vault_link_retired WHERE link_id = ?2) AND NOT EXISTS(SELECT 1 FROM db_vault_link_aliases WHERE link_id = ?2)",
+                params![row.id, link_id],
+            )?;
+            if inserted == 0 { return Err(StoreError::AlreadyExists); }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -301,8 +314,17 @@ impl Store {
 
     /// Deletes an entry and the grants and earlier values it had.
     pub fn vault_delete(&self, id: &str) -> Result<bool, StoreError> {
+        self.vault_delete_bound(id, None)
+    }
+
+    pub fn vault_delete_bound(&self, id: &str, link_id: Option<&str>) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         let tx = conn.unchecked_transaction()?;
+        if let Some(link_id) = link_id {
+            if !super::vault_account_key::matches_link(&tx, id, link_id)? {
+                return Ok(false);
+            }
+        }
         tx.execute("DELETE FROM db_vault_grants WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_versions WHERE entry_id = ?1", params![id])?;
         tx.execute("DELETE FROM db_vault_details_kept WHERE entry_id = ?1", params![id])?;

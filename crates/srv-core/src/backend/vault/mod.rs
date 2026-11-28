@@ -448,7 +448,11 @@ fn insert_in_why(store: &Store, entry: NewEntry, actor: &str, action: &str, targ
 }
 
 /// Saves a new entry in the Vault `vault_id` and leaves the record of it to the caller: its id and label.
-fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Result<(String, String), String> {
+fn insert_unrecorded(store: &Store, entry: NewEntry, vault_id: &str) -> Result<(String, String), String> {
+    insert_unrecorded_bound(store, entry, vault_id, None)
+}
+
+fn insert_unrecorded_bound(store: &Store, mut entry: NewEntry, vault_id: &str, link_id: Option<&str>) -> Result<(String, String), String> {
     store.vault_info(vault_id).map_err(|e| e.to_string())?.ok_or_else(|| format!("no Vault {vault_id}"))?;
     let kind = kinds::kind(&entry.kind).ok_or_else(|| format!("unknown kind {:?}", entry.kind))?;
     drop_empty(&mut entry.parts);
@@ -480,7 +484,7 @@ fn insert_unrecorded(store: &Store, mut entry: NewEntry, vault_id: &str) -> Resu
         last_used_at: 0,
         vault_id: vault_id.to_string(),
     };
-    store.vault_insert(&row).map_err(|e| e.to_string())?;
+    store.vault_insert_bound(&row, link_id).map_err(|e| e.to_string())?;
     if let Err(e) = keep_one_default(store, kind.name, vault_id, &id, &fields) {
         tracing::warn!(entry = %id, error = %e, "vault: the new default card is saved, but another card still has the default flag");
     }

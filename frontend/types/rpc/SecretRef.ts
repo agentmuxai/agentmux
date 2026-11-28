@@ -27,4 +27,4 @@ account: string, } | { "backend": "vault",
 /**
  * The Vault entry's id.
  */
-entry: string, };
+entry: string, link_id?: string, };

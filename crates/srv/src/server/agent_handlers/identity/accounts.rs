@@ -229,8 +229,9 @@ async fn store_secret(identity_store: &Arc<Store>, account_id: &str, req: &Verif
             crate::identity::secret_store::put(&aid, &key)?;
             Ok(SecretRef::Keychain { service, account })
         }
-        Some(SecretRef::Vault { entry }) if crate::backend::vault::account_key::replace(&vault, &entry, &key).is_ok() => Ok(SecretRef::Vault { entry }),
-        _ => crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key).map(|entry| SecretRef::Vault { entry }),
+        Some(reference @ SecretRef::Vault { .. }) => crate::backend::vault::account_key::replace(&vault, &aid, &reference, &key)
+            .or_else(|_| crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key)),
+        _ => crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key),
     })
     .await
     .map_err(|e| format!("account.key.verify: key task: {e}"))?
@@ -241,7 +242,7 @@ async fn store_secret(identity_store: &Arc<Store>, account_id: &str, req: &Verif
 async fn drop_orphaned_secret(identity_store: &Arc<Store>, secret_ref: &SecretRef, account_id: &str) {
     let (vault, secret_ref, aid) = (identity_store.clone(), secret_ref.clone(), account_id.to_string());
     let gone = tokio::task::spawn_blocking(move || match &secret_ref {
-        SecretRef::Vault { entry } => crate::backend::vault::account_key::remove(&vault, entry),
+        SecretRef::Vault { .. } => crate::backend::vault::account_key::remove(&vault, &aid, &secret_ref),
         _ => crate::identity::secret_store::delete(&aid),
     })
     .await
@@ -312,16 +313,16 @@ mod tests {
         let mut existing = account("acct-1", json!({ "note": "kept", "scopes": "old" }));
         existing.created_at = 42;
         let req = key_req(json!({ "context": { "note": "from the user", "extra": 1 } }));
-        let row = key_account_row(&req, "acct-1", Some(&existing), SecretRef::Vault { entry: "e1".into() }, "valid".to_string(), json!({ "scopes": "from the probe" }), "••••1234");
+        let row = key_account_row(&req, "acct-1", Some(&existing), SecretRef::Vault { entry: "e1".into(), link_id: Some("link-1".into()) }, "valid".to_string(), json!({ "scopes": "from the probe" }), "••••1234");
         assert_eq!(row.context, json!({ "note": "from the user", "extra": 1, "scopes": "from the probe", "masked_tail": "••••1234" }));
         assert_eq!((row.created_at, row.status.as_str(), row.kind.as_str()), (42, "valid", "api_key"));
-        assert_eq!(row.secret_ref, SecretRef::Vault { entry: "e1".into() }, "the DB keeps a pointer, never the key");
+        assert_eq!(row.secret_ref, SecretRef::Vault { entry: "e1".into(), link_id: Some("link-1".into()) }, "the DB keeps a pointer, never the key");
     }
 
     #[test]
     fn a_new_keys_row_has_its_own_time_and_the_kind_the_caller_gave() {
         let before = agentmux_common::time::now_ms();
-        let row = key_account_row(&key_req(json!({ "kind": "pat", "displayName": "Work" })), "acct-2", None, SecretRef::Vault { entry: "e2".into() }, "unknown".to_string(), json!({}), "tail");
+        let row = key_account_row(&key_req(json!({ "kind": "pat", "displayName": "Work" })), "acct-2", None, SecretRef::Vault { entry: "e2".into(), link_id: None }, "unknown".to_string(), json!({}), "tail");
         assert!(row.created_at >= before && row.created_at == row.updated_at);
         assert_eq!((row.kind.as_str(), row.display_name.as_str(), row.id.as_str()), ("pat", "Work", "acct-2"));
     }
@@ -338,7 +339,7 @@ mod tests {
         let vault = vault();
         let req = key_req(json!({ "provider": "anthropic", "name": "work" }));
         let secret_ref = store_secret(&vault, "acct-1", &req, None).await.unwrap();
-        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer") };
+        let SecretRef::Vault { entry, .. } = &secret_ref else { panic!("expected a Vault pointer") };
         let row = vault.vault_get(entry).unwrap().expect("the entry exists");
         assert_eq!((row.kind.as_str(), row.label.as_str()), ("api-key", "anthropic account key: work"));
         let mut account = key_account_row(&req, "acct-1", None, secret_ref.clone(), "valid".into(), json!({}), "tail");
@@ -356,12 +357,10 @@ mod tests {
         existing.secret_ref = first.clone();
         let again = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-new-5678" })), Some(&existing)).await.unwrap();
         assert_eq!(again, first, "the same entry");
-        let SecretRef::Vault { entry } = &first else { panic!("expected a Vault pointer") };
-        assert_eq!(&**crate::backend::vault::account_key::read(&vault, entry).unwrap(), "sk-new-5678");
-        crate::backend::vault::account_key::remove(&vault, entry).unwrap();
+        assert_eq!(&**crate::backend::vault::account_key::read(&vault, "acct-1", &first).unwrap(), "sk-new-5678");
+        crate::backend::vault::account_key::remove(&vault, "acct-1", &first).unwrap();
         let remade = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-newer-9012" })), Some(&existing)).await.unwrap();
-        let SecretRef::Vault { entry: made } = &remade else { panic!("expected a Vault pointer") };
-        assert_eq!(&**crate::backend::vault::account_key::read(&vault, made).unwrap(), "sk-newer-9012");
+        assert_eq!(&**crate::backend::vault::account_key::read(&vault, "acct-1", &remade).unwrap(), "sk-newer-9012");
     }
 
     #[tokio::test]
@@ -369,8 +368,27 @@ mod tests {
         let vault = vault();
         let secret_ref = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap();
         drop_orphaned_secret(&vault, &secret_ref, "acct-1").await;
-        let SecretRef::Vault { entry } = &secret_ref else { panic!("expected a Vault pointer") };
+        let SecretRef::Vault { entry, .. } = &secret_ref else { panic!("expected a Vault pointer") };
         assert!(vault.vault_get(entry).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_reused_or_unowned_entry_gets_a_new_pointer_when_the_account_key_is_saved() {
+        for legacy in [false, true] {
+            let vault = vault();
+            let req = key_req(json!({}));
+            let first = store_secret(&vault, "acct-1", &req, None).await.unwrap();
+            let SecretRef::Vault { entry, .. } = &first else { panic!("expected a Vault pointer") };
+            crate::backend::vault::delete(&vault, entry).unwrap();
+            let second = store_secret(&vault, "acct-2", &req, None).await.unwrap();
+            let mut previous = account("acct-1", json!({}));
+            previous.secret_ref = if legacy { SecretRef::Vault { entry: entry.clone(), link_id: None } } else { first };
+            vault.identity_upsert(&previous).unwrap();
+            let remade = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "new-test-value" })), Some(&previous)).await.unwrap();
+            assert!(remade != second, "saving the previous account creates its own entry");
+            assert!(crate::backend::vault::account_key::read(&vault, "acct-2", &second).is_ok_and(|value| &**value == "sk-secret-1234"));
+            assert!(crate::backend::vault::account_key::read(&vault, "acct-1", &remade).is_ok_and(|value| &**value == "new-test-value"));
+        }
     }
 
     #[test]
