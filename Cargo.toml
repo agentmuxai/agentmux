@@ -20,6 +20,10 @@ debug = "line-tables-only"
 
 [profile.release]
 strip = true
+# Line tables, so the PDB a release build writes names every function (the shipped exe is the same size:
+# on Windows the symbols live in the PDB, not in the exe). Without them a minidump of a wedged srv shows
+# only offsets. scripts/pack-windows-symbols.sh keeps the PDB; it is never shipped.
+debug = "line-tables-only"
 lto = true
 codegen-units = 1
 opt-level = "s"

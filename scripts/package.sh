@@ -180,6 +180,11 @@ task build:backend
 phase_done "srv (cargo build --release)"
 task build:host
 phase_done "host"
+# The release's PDBs, kept for reading a wedged srv's dump. Packed beside the output, not in it (the
+# release workflow decides where they are stored; they are private and never a release asset).
+if [ "${STRIP_MAPS:-0}" = "1" ] && [ -n "$OUTDIR" ]; then
+    bash scripts/pack-windows-symbols.sh "$VERSION" "$OUTDIR"
+fi
 task bundle
 phase_done "bundle"
 
