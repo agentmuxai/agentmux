@@ -3,7 +3,7 @@
 **Date:** 2026-11-23
 **Author:** Agent5
 **Type:** Spec (a storage and retention change; what a person reads of a conversation does not change)
-**Status:** active — PR 1 (#8429) adds the pure compact module and checks L1 to L4; PR 2 (#8431) adds the live file; PR 3 is built in parts: the provider-file module (#8437, proof, import, removal by session id), then its wiring (the session-end sweep, off by default), then the container path, the continuation packet and the retention seed; PRs 4 to 7 of section 15 remain.
+**Status:** active — PR 1 (#8429) adds the pure compact module and checks L1 to L4; PR 2 (#8431) adds the live file; PR 3 is built in parts: the provider-file module (#8437, proof, import, removal by session id), then its wiring (#8438, the session-end sweep, off by default; review fixes #8445), then the container path, the continuation packet and the retention seed; PR 5 is built in parts, 5a first (new data is written once: the per-channel copy is no longer written, no setting, existing copies untouched); PRs 4 to 7 of section 15 otherwise remain.
 **Area:** history store
 **Supersedes:** `SPEC_HISTORY_CONSOLIDATION_NO_RAW_RETENTION_2026_11_14.md` (never built; its migration protocol, §6 and §8 there, is reused here). **Builds on:** `SPEC_HISTORY_STORE_COMPRESSION_AND_COMPACTION_2026_10_21.md` (frames, the framer, recovery rules), which stays in force; its rule 6, "history is kept forever", is restated in §10.
 **Task:** #48525 (spec), #48526 (build).
@@ -201,7 +201,7 @@ Rule 6 of the frame spec stays true and gets sharper: **every message, reply, to
 
 ## 12. Settings
 
-**No setting turns redundant retention on.** `agent:rawsessionidledays` (§5.4) can only shorten the life of a provider file, within its cap. **A person cannot opt in**: a "keep provider files" or "keep fragments" switch would recreate the second copy, its migration and its tests, and would be set by anyone who wants an older tool to keep working. A **debug capture** exists for developers only: the environment variable `AGENTMUX_DEBUG_KEEP_RAW=1`, honoured **only in a development build**, not persisted, active for the life of that process, shown as a banner in the pane and the Storage view, writing to a folder removed when the process ends.
+**No setting turns redundant retention on.** `agent:rawsessionidledays` (§5.4) can only shorten the life of a provider file, within its cap. **A person cannot opt in**: a "keep provider files" or "keep fragments" switch would recreate the second copy, its migration and its tests, and would be set by anyone who wants an older tool to keep working. A **debug capture** exists for developers only: the environment variable `AGENTMUX_DEBUG_KEEP_RAW=1`, honoured **only in a development build**, not persisted, active for the life of that process, shown as a banner in the pane and the Storage view, writing to a folder removed when the process ends. **The settings this change adds** are `history:sessionfilesweep` (the session-end sweep of §5.4; off until PR 6, which makes it on by default for a new install from its first start and turns it on for an existing install only after the migration has proved every session, §9) and `agent:rawsessionidledays` (§5.4). The per-channel copy has no setting (§3 row 2): new data is written once. **Deleting an agent removes its `agent-uid:<uid>:provider` zone (§5.2 step 4) with its other zones**; otherwise the proof finds nothing to match and the whole provider conversation would be imported again.
 
 ## 13. Tests (the guarantee, proved)
 

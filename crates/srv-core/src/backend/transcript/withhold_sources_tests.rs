@@ -106,7 +106,7 @@ fn a_stored_transcript_never_holds_a_token_an_agent_printed() {
         "withhold-store-block",
         &line.to_string(),
         Some(&own),
-        Some("agent:withhold-store:current"),
+        Some("agent:claude:current"), // a quick-launch provider's zone: the block keeps its own copy
         super::origin_sig::WriterRuntime::Host,
     );
     let stored = String::from_utf8(own.read_file("withhold-store-block", "output").unwrap().unwrap_or_default()).unwrap();

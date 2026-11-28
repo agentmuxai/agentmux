@@ -672,13 +672,6 @@
     // docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md.
     // "agent:maystartagents": false,
 
-    // Write a defined agent's transcript to the agent's own zone in the global transcript store
-    // only, not also to the block's own store. Halves what AgentMux writes to disk while agents
-    // run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that
-    // have lost the agent lease keep their own copy. Off until it has been through a soak. See
-    // docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md.
-    // "agent:transcriptsinglecopy": false,
-
     // On by default; set false to turn it off. When an agent hits its usage limit, AgentMux
     // moves it, after its turn, to another signed-in account of the same provider that has
     // quota, and tells the agent and its lead in one note. It never picks a signed-out account

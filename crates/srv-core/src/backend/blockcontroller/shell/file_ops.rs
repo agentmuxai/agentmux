@@ -10,7 +10,7 @@ use base64::Engine as _;
 
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::mps;
-use crate::backend::transcript::append::{append_transcript, mirror_append_to_global};
+use crate::backend::transcript::append::append_transcript;
 
 use super::term_cap;
 
@@ -206,18 +206,6 @@ pub fn handle_append_block_file(
         // every incremental-index failure mode (desync on write failure,
         // chunk-split lines, blank-line miscounting) at the cost of scanning the
         // appended bytes on the next read.
-    }
-
-    // Mirror the agent's `output` stream into the GLOBAL transcript zone
-    // (`agent:<defId>:current`) so the conversation loads when this agent is
-    // opened from another build/channel. Fire-and-forget, exactly like the
-    // per-channel write above: a global-store hiccup must never stall the live
-    // pane. Callers pass `Some(zone)` only for the agent output stream, so we
-    // never mirror PTY `term` data or non-agent blocks.
-    if let Some(zone) = global_output_zone {
-        if let Some(gfs) = crate::backend::agent_session::global_transcript_store() {
-            mirror_append_to_global(gfs, zone, data);
-        }
     }
 }
 

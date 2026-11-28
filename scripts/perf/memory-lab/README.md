@@ -196,7 +196,7 @@ bodies a live page had unloaded shows in `toolTextKB`.
 ## Passing an app setting to the instance
 
 `--setting NAME=value` (repeat it for several) puts an app setting in the instance's `settings.json`, for an experiment whose
-switch is a setting (for example `--setting agent:transcriptsinglecopy=true`). An environment variable cannot do this: it does
+switch is a setting (for example `--setting history:sessionfilesweep=true`). An environment variable cannot do this: it does
 not get through the launcher to srv. The value is read as `true`/`false`, a number, JSON (`[..]`, `{..}`, `"..."`) or plain
 text. Which folder a build reads settings from depends on its channel (a local build has its own, a release uses the shared
 one), and that is known only once it has run, so the lab starts the instance on the empty data folder, writes the file in every
