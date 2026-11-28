@@ -137,8 +137,8 @@ async fn revoke_at_provider(mstore: &Arc<Store>, acct: Option<&IdentityAccount>)
 /// was no account row to clean up after.
 async fn remove_secrets(acct: Option<IdentityAccount>, identity_store: &Arc<Store>) -> serde_json::Value {
     let Some(acct) = acct else { return serde_json::Value::Null };
-    if let SecretRef::Vault { entry } = &acct.secret_ref {
-        return remove_vault_entry(identity_store.clone(), entry.clone()).await;
+    if matches!(acct.secret_ref, SecretRef::Vault { .. }) {
+        return remove_vault_entry(identity_store.clone(), acct).await;
     }
     // Containment root for OAuth dirs: only paths inside ~/.agentmux/shared/identities/ are ever
     // removed (the legacy ~/.claude migration dir is the user's global CLI login: never ours to delete).
@@ -150,8 +150,8 @@ async fn remove_secrets(acct: Option<IdentityAccount>, identity_store: &Arc<Stor
 }
 
 /// An API key account's key is a Vault entry: it goes with the account. A failure is reported like a keychain one.
-async fn remove_vault_entry(identity_store: Arc<Store>, entry: String) -> serde_json::Value {
-    match tokio::task::spawn_blocking(move || crate::backend::vault::account_key::remove(&identity_store, &entry)).await {
+async fn remove_vault_entry(identity_store: Arc<Store>, account: IdentityAccount) -> serde_json::Value {
+    match tokio::task::spawn_blocking(move || crate::backend::vault::account_key::remove(&identity_store, &account.id, &account.secret_ref)).await {
         Ok(Ok(())) => json!({ "outcome": "removed" }),
         Ok(Err(e)) => json!({ "outcome": "failed", "detail": e }),
         Err(e) => json!({ "outcome": "failed", "detail": e.to_string() }),

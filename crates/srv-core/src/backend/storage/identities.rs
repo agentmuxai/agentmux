@@ -118,6 +118,9 @@ pub enum SecretRef {
     Vault {
         /// The Vault entry's id.
         entry: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        link_id: Option<String>,
     },
 }
 
@@ -429,7 +432,13 @@ impl Store {
                 provider = excluded.provider,
                 kind = excluded.kind,
                 display_name = excluded.display_name,
-                secret_ref = excluded.secret_ref,
+                secret_ref = CASE
+                    WHEN json_extract(excluded.secret_ref, '$.backend') = 'vault'
+                     AND json_extract(db_accounts.secret_ref, '$.backend') = 'vault'
+                     AND json_extract(excluded.secret_ref, '$.entry') = json_extract(db_accounts.secret_ref, '$.entry')
+                     AND json_extract(excluded.secret_ref, '$.link_id') IS NULL
+                     AND json_extract(db_accounts.secret_ref, '$.link_id') IS NOT NULL
+                    THEN db_accounts.secret_ref ELSE excluded.secret_ref END,
                 context = excluded.context,
                 status = excluded.status,
                 updated_at = excluded.updated_at",
