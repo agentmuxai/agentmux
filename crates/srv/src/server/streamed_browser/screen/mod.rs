@@ -5,14 +5,16 @@
 //! gets the same frames and sends the same messages as the streamed browser (`pane.rs`, `protocol.rs`), but a frame is the whole screen
 //! (the browser's own tab strip and address bar included) and input goes to the screen as a person's mouse and keyboard would, so the browser
 //! does not report itself as remote-controlled (Chromium turns that report on for a debugging pipe, an automation or headless switch).
-//! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard, a fixed screen size.
+//! A prototype for the decision in task 48354: no agent driving, no windows list, a US keyboard. The screen follows the pane's size (`randr`).
 
 mod clipboard;
+mod ewmh;
 mod frames;
 mod held;
 mod keymap;
 mod pace;
 mod policy;
+mod randr;
 mod session;
 mod watch;
 mod wm;
@@ -87,6 +89,10 @@ pub fn upgrade(ws: WebSocketUpgrade, start: Start, ended: impl std::future::Futu
     })
 }
 
+fn size_message(w: u16, h: u16) -> Message {
+    Message::Text(json!({ "t": "size", "w": w, "h": h }).to_string().into())
+}
+
 fn error(message: &str) -> Message {
     Message::Text(json!({ "t": "error", "message": message }).to_string().into())
 }
@@ -97,8 +103,10 @@ fn error(message: &str) -> Message {
 /// `FPS` a second, but come at once and quickly just after the person's input (`pace`).
 fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -> Result<(), String> {
     let screen = x::Screen::connect(display)?;
+    // A screen that changes size is read at its new size, whole.
+    screen.follow_size()?;
     let damage = screen.watch_damage()?;
-    let (w, h) = (screen.w, screen.h);
+    let (mut w, mut h) = screen.size();
     std::thread::spawn(move || {
         let steady = Duration::from_millis(1000 / FPS);
         let mut picture = frames::Picture::new(w, h);
@@ -110,7 +118,9 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -
             if pending.is_none() && !unsent {
                 // Waits until the screen changes; ends with the screen (the thread goes when the browser's screen does).
                 match screen.wait_damage() {
-                    Ok(at) => pending = Some(at),
+                    Ok(Some(at)) => pending = Some(at),
+                    // The screen changed size: handled below, with whatever else changed.
+                    Ok(None) => {}
                     Err(_) => return,
                 }
             }
@@ -124,13 +134,23 @@ fn capture(display: &str, tx: mpsc::Sender<Vec<u8>>, activity: pace::Activity) -
                 Ok(None) => {}
                 Err(_) => return,
             }
+            if screen.take_resized() {
+                (w, h) = screen.size();
+                picture = frames::Picture::new(w, h);
+                pending = Some(frames::Rect::whole(w, h));
+                unsent = true;
+            }
             if let Some(at) = pending.take() {
                 // Taken in before it is read, so a change made while it is read is not lost.
                 if screen.clear_damage(damage).is_err() {
                     return;
                 }
-                let Ok(part) = screen.grab_rect(at) else { return };
-                unsent |= picture.update(at, &part);
+                match screen.grab_rect(at) {
+                    Ok(part) => unsent |= picture.update(at, &part),
+                    // A read that fails because the screen changed size just then is made again, whole, at the new size; any other is the end.
+                    Err(_) if screen.refresh_size() => unsent = true,
+                    Err(_) => return,
+                }
             }
             if unsent {
                 let Ok(frame) = frames::frame_message(picture.pixels(), u32::from(w), u32::from(h)) else { return };
@@ -179,11 +199,21 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
         let _ = socket.send(error(&e)).await;
         return;
     }
+    // The browser's window fills the screen once it is up, and (maximised) follows the screen when the pane is resized (`ewmh`).
+    let display = session.display.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = x::Screen::connect(&display).and_then(|s| s.maximize_first_within(Duration::from_secs(15))) {
+            tracing::warn!(error = %e, "screen browser: the window was not maximised");
+        }
+    });
     let mut watch = watch::Watch::default();
-    let _ = socket.send(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())).await;
+    let (sw, sh) = input.size();
+    let _ = socket.send(size_message(sw, sh)).await;
     let mut held = held::Held::default();
+    let mut settle = randr::Settle::default();
     tokio::pin!(ended);
     loop {
+        let settled = settle.due_at().map(tokio::time::Instant::from_std);
         let keep = tokio::select! {
             // A window opening is handled before the next thing the person typed, so the key hold starts first; what the person sends is
             // read before the next frame is sent, so a slow link that keeps the frame channel full never starves the person's input.
@@ -198,7 +228,7 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
             },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Text(t))) => {
-                    if let Some(said) = on_client(&input, t.as_str(), &start, watch.keys_held(Instant::now()), &mut held, &activity, clip.as_ref()).await {
+                    if let Some(said) = on_client(&input, t.as_str(), &mut settle, watch.keys_held(Instant::now()), &mut held, &activity, clip.as_ref()).await {
                         socket.send(said).await.is_ok()
                     } else {
                         true
@@ -206,6 +236,14 @@ async fn run(mut socket: WebSocket, start: Start, ended: impl std::future::Futur
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => false,
                 Some(Ok(_)) => true,
+            },
+            // The pane's size has stayed the same for a moment: the screen is made that size, and the pane is told.
+            () = async { tokio::time::sleep_until(settled.unwrap_or_else(tokio::time::Instant::now)).await }, if settled.is_some() => match settle.take(Instant::now()) {
+                Some((w, h)) => match input.resize(w, h) {
+                    Ok(()) => socket.send(size_message(w, h)).await.is_ok(),
+                    Err(e) => socket.send(error(&e)).await.is_ok(),
+                },
+                None => true,
             },
             frame = frames.recv() => match frame {
                 Some(f) => socket.send(Message::Binary(f.into())).await.is_ok(),
@@ -252,7 +290,7 @@ fn watch_windows(display: &str, tx: mpsc::UnboundedSender<usize>, opened: Arc<At
 
 /// One message from the pane, sent to the screen. A word for the pane when there is one to say. While `keys_held`, a key press or a
 /// paste is dropped (a window just opened that the person did not choose); a release still goes, so no key is left down.
-async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: bool, held: &mut held::Held, activity: &pace::Activity, clip: Option<&Arc<clipboard::Clipboard>>) -> Option<Message> {
+async fn on_client(screen: &x::Screen, text: &str, settle: &mut randr::Settle, keys_held: bool, held: &mut held::Held, activity: &pace::Activity, clip: Option<&Arc<clipboard::Clipboard>>) -> Option<Message> {
     let msg = match protocol::parse(text) {
         Ok(m) => m,
         Err(e) => return Some(error(&e)),
@@ -270,6 +308,11 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: boo
     if matches!(msg, ClientMsg::Copy) {
         return copy_out(clip).await;
     }
+    // The pane's size is followed once it has stayed the same for a moment (`randr::Settle`), and the pane is told then.
+    if let ClientMsg::Resize { w, h } = msg {
+        settle.ask(randr::clamp(w, h), Instant::now());
+        return None;
+    }
     let sent = match msg {
         // The text goes to the screen's clipboard and Ctrl+V is pressed, with the other modifiers let go; without a clipboard it is typed key by key.
         ClientMsg::Paste { ref text } if clip.is_some() => paste_exact(screen, clip, text, held.keys()).await,
@@ -277,14 +320,7 @@ async fn on_client(screen: &x::Screen, text: &str, start: &Start, keys_held: boo
         ClientMsg::Paste { .. } => send_without_modifiers(screen, &msg, held.keys()).await,
         _ => send_input(screen, &msg).await,
     };
-    match sent {
-        Ok(()) => match msg {
-            // The screen keeps its size: say so, as a resize that was answered.
-            ClientMsg::Resize { .. } => Some(Message::Text(json!({ "t": "size", "w": start.w, "h": start.h }).to_string().into())),
-            _ => None,
-        },
-        Err(e) => Some(error(&e)),
-    }
+    sent.err().map(|e| error(&e))
 }
 
 /// Paste `text` exactly: offer it as the screen's clipboard and press Ctrl+V (the other modifiers the person holds are let go for the while, and

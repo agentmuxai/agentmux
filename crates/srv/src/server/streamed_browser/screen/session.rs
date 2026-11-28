@@ -52,9 +52,10 @@ fn kill_group(group: u32) {
 #[cfg(not(unix))]
 fn kill_group(_group: u32) {}
 
-/// The arguments of the virtual screen: a size, no network listener, and the display number written to standard output.
-pub fn xvfb_args(w: u32, h: u32) -> Vec<String> {
-    vec!["-displayfd".into(), "1".into(), "-screen".into(), "0".into(), format!("{w}x{h}x{DEPTH}"), "-nolisten".into(), "tcp".into(), "-noreset".into()]
+/// The arguments of the virtual screen: the largest size it can be (it is set to the pane's size at once, and follows it after: `randr`), no
+/// network listener, and the display number written to standard output.
+pub fn xvfb_args() -> Vec<String> {
+    vec!["-displayfd".into(), "1".into(), "-screen".into(), "0".into(), format!("{}x{}x{DEPTH}", super::randr::MAX_W, super::randr::MAX_H), "-nolisten".into(), "tcp".into(), "-noreset".into()]
 }
 
 /// The arguments of the browser: a profile of its own, the address proxy, a window the size of the screen, and the page to open.
@@ -116,7 +117,7 @@ pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, St
     // What the browser may open and the network it has (the proxy's port) are its managed policy: nothing starts without it.
     super::policy::ensure(&chrome_bin, first, proxy_port)?;
 
-    let mut xvfb = command(&xvfb_bin, &xvfb_args(w, h), None).stdout(Stdio::piped()).spawn().map_err(|e| format!("cannot start Xvfb: {e}"))?;
+    let mut xvfb = command(&xvfb_bin, &xvfb_args(), None).stdout(Stdio::piped()).spawn().map_err(|e| format!("cannot start Xvfb: {e}"))?;
     let out = xvfb.stdout.take().ok_or("Xvfb has no output")?;
     let mut line = String::new();
     tokio::time::timeout(Duration::from_secs(15), BufReader::new(out).read_line(&mut line))
@@ -125,6 +126,10 @@ pub async fn start(w: u32, h: u32, url: &str, first: bool) -> Result<Session, St
         .map_err(|e| format!("the virtual screen's display could not be read: {e}"))?;
     let number: u32 = line.trim().parse().map_err(|_| format!("the virtual screen said {:?}, not a display number", line.trim()))?;
     let display = format!(":{number}");
+    // The screen starts as large as it can be; it is made the pane's size before the browser opens, so its window is that size from the start.
+    let (w, h) = super::randr::clamp(w, h);
+    super::x::Screen::connect(&display)?.resize(w, h)?;
+    let (w, h) = (u32::from(w), u32::from(h));
 
     let profile = tempfile::Builder::new().prefix("agentmux-screen-browser-").tempdir().map_err(|e| format!("cannot make the browser's profile folder: {e}"))?;
     // The window manager runs with settings that bind nothing (wm.rs): a client's keys and mouse reach the browser and nothing else.
@@ -216,9 +221,10 @@ mod tests {
     }
 
     #[test]
-    fn the_virtual_screen_has_the_size_asked_for_and_no_network_listener() {
-        let a = xvfb_args(1024, 640);
-        assert!(a.windows(2).any(|p| p == ["-screen", "0"]) && a.contains(&"1024x640x24".to_string()));
+    fn the_virtual_screen_starts_as_large_as_it_can_be_and_has_no_network_listener() {
+        let a = xvfb_args();
+        let largest = format!("{}x{}x24", super::super::randr::MAX_W, super::super::randr::MAX_H);
+        assert!(a.windows(2).any(|p| p == ["-screen", "0"]) && a.contains(&largest));
         assert!(a.windows(2).any(|p| p == ["-nolisten", "tcp"]));
         assert!(a.windows(2).any(|p| p == ["-displayfd", "1"]));
     }

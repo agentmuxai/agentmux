@@ -32,7 +32,7 @@ const PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"h
 
 /// The colour (blue, green, red) of the pixel at (x, y) of a grabbed screen.
 fn pixel(screen: &x::Screen, bgrx: &[u8], x: usize, y: usize) -> [u8; 3] {
-    let i = (y * usize::from(screen.w) + x) * 4;
+    let i = (y * usize::from(screen.size().0) + x) * 4;
     [bgrx[i], bgrx[i + 1], bgrx[i + 2]]
 }
 
@@ -71,7 +71,7 @@ async fn screen_mode_real() {
     }
     let session = session::start(800, 600, PAGE, true).await.expect("the screen and the browser start");
     let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
-    assert_eq!((screen.w, screen.h), (800, 600));
+    assert_eq!(screen.size(), (800, 600));
     // Under the browser's own tab strip and address bar: the page.
     let (px, py) = (400, 400);
     wait_for_colour(&screen, px, py, [0, 0, 255], 30).await.expect("the page is red: the browser does not say it is remote-controlled");
@@ -120,7 +120,7 @@ async fn screen_mode_popup_real() {
 }
 
 /// A page whose text box holds a text and has it selected, with a non-US letter in it.
-const COPY_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0\"><textarea autofocus onfocus=\"this.select()\" style=\"width:100%25;height:100%25;margin:0;background:blue\">copy me, W%C3%B6rld</textarea></body></html>";
+const COPY_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0\"><textarea autofocus onfocus=\"this.select()\" style=\"width:100%25;height:100%25;margin:0;background:blue\">copy me, W%C3%B6rld</textarea></body></html>";
 
 /// What the person copies in the remote browser (Ctrl+C) can be read out of the screen's clipboard, exactly, and nothing is read before that.
 /// Run with the same command as `screen_mode_real`, by name `screen_mode_copy_real`.
@@ -153,8 +153,71 @@ async fn screen_mode_copy_real() {
     assert_eq!(text, "copy me, Wörld");
 }
 
+/// A page with a text box and three stripes under it that say what the box holds: the first turns green when the text starts with "café" (a
+/// letter with no US key), the second when it ends with 😀 (a character outside the first plane), the third when it is seven code units long
+/// ("café 😀"); red when not. The expected characters are built from character codes, so the page does not depend on how its own text is read.
+const PASTE_NON_US_PAGE: &str = "data:text/html;charset=utf-8,<html><body style=\"margin:0;background:blue\"><textarea autofocus style=\"display:block;width:800px;height:300px;margin:0;background:blue\" oninput=\"var v=this.value,e=String.fromCharCode(233),s=String.fromCharCode(55357,56832);document.getElementById('a').style.background=v.indexOf('caf'+e)==0&&'lime'||'red';document.getElementById('b').style.background=v.slice(-2)==s&&'lime'||'red';document.getElementById('c').style.background=v.length==7&&'lime'||'red'\"></textarea><div id=a style=\"height:100px;background:blue\"></div><div id=b style=\"height:100px;background:blue\"></div><div id=c style=\"height:100px;background:blue\"></div></body></html>";
+
+/// A paste through the screen's clipboard is exact: a letter with no US key and an emoji arrive in the page (typing key by key would skip them).
+/// The three stripes say which part failed. Run with the same command as `screen_mode_real`, by name `screen_mode_paste_exact_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_paste_exact_real() {
+    if which::which("Xvfb").is_err() || chromium_missing() {
+        eprintln!("screen_mode_paste_exact_real: no Xvfb or no Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, PASTE_NON_US_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    wait_for_colour(&screen, 700, 550, [255, 0, 0], 30).await.expect("the page is up (blue)");
+    let clip = std::sync::Arc::new(clipboard::Clipboard::connect(&session.display).expect("the clipboard connects"));
+    send_input(&screen, &click_at(MouseKind::Down)).await.unwrap();
+    send_input(&screen, &click_at(MouseKind::Up)).await.unwrap();
+    paste_exact(&screen, Some(&clip), "café 😀", &[]).await.expect("the paste is sent");
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let grabbed = screen.grab().expect("the screen is read");
+    let says = |y| match pixel(&screen, &grabbed, 700, y) {
+        [0, 255, 0] => "ok",
+        [0, 0, 255] => "WRONG",
+        [255, 0, 0] => "NO INPUT EVENT",
+        _ => "?",
+    };
+    let (prefix, emoji, length) = (says(350), says(450), says(550));
+    assert_eq!((prefix, emoji, length), ("ok", "ok", "ok"), "the text starts with café: {prefix}; ends with the emoji: {emoji}; is seven code units: {length}");
+}
+
 fn click_at(kind: MouseKind) -> ClientMsg {
     ClientMsg::Mouse { kind, x: 400.0, y: 400.0, button: Button::Left, buttons: 1, clicks: 1, mods: 0 }
+}
+
+/// A page that is blue everywhere, so a screen that is bigger than the browser's window shows where the window ends.
+const BLUE_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\"></body></html>";
+
+/// The screen follows the size it is asked for, bigger and smaller, and the browser's maximised window follows the screen: the corner is still
+/// the page's. Run with the same command as `screen_mode_real`, by name `screen_mode_resize_real`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs Xvfb, openbox and a Chrome; run by hand on a Linux host"]
+async fn screen_mode_resize_real() {
+    if which::which("Xvfb").is_err() || which::which("openbox").is_err() || chromium_missing() {
+        eprintln!("screen_mode_resize_real: no Xvfb, openbox or Chrome here; nothing run");
+        return;
+    }
+    let session = session::start(800, 600, BLUE_PAGE, true).await.expect("the screen and the browser start");
+    let screen = x::Screen::connect(&session.display).expect("the screen is reachable");
+    assert_eq!(screen.size(), (800, 600), "the screen is the size the pane asked for");
+    // The window manager's maximise, as the pane's session makes it once the window is up; the window then fills the screen.
+    screen.maximize_first_within(Duration::from_secs(30)).expect("the browser's window is maximised");
+    wait_for_colour(&screen, 799, 599, [255, 0, 0], 30).await.expect("the page fills the screen (blue)");
+    for (w, h) in [(1024u16, 700u16), (640, 480), (1200, 800), (800, 600)] {
+        screen.resize(w, h).unwrap_or_else(|e| panic!("resize to {w}x{h}: {e}"));
+        assert_eq!(screen.size(), (w, h));
+        assert_eq!(screen.grab().expect("the screen is read").len(), usize::from(w) * usize::from(h) * 4);
+        wait_for_colour(&screen, usize::from(w) - 10, usize::from(h) - 10, [255, 0, 0], 10).await.unwrap_or_else(|e| panic!("the window did not follow the screen to {w}x{h}: {e}"));
+    }
+    // A size that is too small or too large is cut, and the same size twice does nothing.
+    screen.resize(10, 10).unwrap();
+    assert_eq!(screen.size(), (randr::MIN_SIDE, randr::MIN_SIDE));
+    screen.resize(randr::MIN_SIDE, randr::MIN_SIDE).unwrap();
 }
 
 fn chromium_missing() -> bool {
@@ -221,7 +284,7 @@ async fn screen_mode_idle_real() {
 
 /// A page with a text box that turns green when it holds exactly the text the test pastes (with a newline and a hash sign), and red for any
 /// other text. (No hash sign or question mark in the address itself: a data address ends at the first hash sign.)
-const PASTE_PAGE: &str = "data:text/html,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">\
+const PASTE_PAGE: &str = "data:text/html;charset=utf-8,<html style=\"height:100%25\"><body style=\"height:100%25;margin:0;background:blue\">\
                           <textarea autofocus style=\"width:100%25;height:100%25;margin:0;background:blue\" \
                           oninput=\"this.style.background=this.value==['Hello, World! %2342','line two'].join(String.fromCharCode(10))&&'lime'||'red'\">\
                           </textarea></body></html>";
