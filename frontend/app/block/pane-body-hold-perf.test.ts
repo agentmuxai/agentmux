@@ -68,8 +68,10 @@ describe("[perf] border-content", () => {
         const out = lines(warn);
         expect(out).toHaveLength(1);
         expect(out[0]).toMatch(/^\[perf\] border-content moves=6 /);
-        expect(out[0]).toMatch(/mid-drag catch-ups term\(n=1 p50=\d+ms worst=\d+ms\)/);
+        // What the catch-up cost is read against an ordinary frame: both are on the line.
+        expect(out[0]).toMatch(/mid-drag catch-ups term\(n=1 p50=\d+ms worst=\d+ms; frame-after p50=\d+ms worst=\d+ms\)/);
         expect(out[0]).toContain("behind at release 0");
+        expect(out[0]).toMatch(/frames without one p50=\d+ms p95=\d+ms$/);
     });
 
     it("reports a body still behind when the drag ended", () => {
