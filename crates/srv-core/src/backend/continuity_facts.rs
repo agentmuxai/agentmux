@@ -153,8 +153,11 @@ pub(crate) fn held_tasks(identity: &Store, agent_id: &str, uid: &str) -> Vec<(St
 pub(crate) fn collect(mstore: &Store, identity: Option<&Store>, block_id: &str) -> Facts {
     let mut facts = Facts::default();
     let Some(agent_id) = crate::identity::resolver::block_agent_id(mstore, block_id) else { return facts };
-    let regs = crate::backend::reactive::get_global_handler().list_agents();
-    let reg = regs.iter().find(|r| r.block_id == block_id);
+    // A spawn started by a jekt runs under the reactive handler's own lock, and building the packet is part of
+    // that spawn: the blocking `list_agents` would wait for a lock this very thread holds, for good (#48776).
+    // The bounded try-lock answers `None` then, and the facts that need the registration are left out.
+    let reg = crate::backend::reactive::get_global_handler().try_get_agent_by_block(block_id);
+    let reg = reg.as_ref();
 
     if let Some(identity) = identity {
         let uid = reg.and_then(|r| r.uid.clone()).unwrap_or_default();
