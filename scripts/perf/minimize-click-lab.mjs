@@ -168,6 +168,10 @@ function parseArgs(argv) {
     lines: Number(get("--lines", 1500)),
     restMs: Number(get("--rest-ms", 0)),
     rounds: Number(get("--rounds", 1)),
+    // Maximize (the pane's Magnify button; restored by a second click, which is not counted) and Close (a pane of its own
+    // each, as for a merge). 0 leaves them out.
+    maxRepeat: Number(get("--max-repeat", 0)),
+    closeRepeat: Number(get("--close-repeat", 0)),
   };
 }
 
@@ -203,12 +207,12 @@ async function fillTranscripts(d, lines) {
 }
 
 /** One measurement: a click on the Minimize (or Restore) button of the pane `blockId`. */
-async function clickOnce(d, blockId, chip, restMs = 0) {
+async function clickOnce(d, blockId, chip, restMs = 0, control = ".block-frame-minimize") {
   if ((await d.eval("document.visibilityState")) !== "visible") throw new Error("the lab window is hidden (minimized or covered): it paints no frames, so nothing can be measured");
   await d.eval(PROBE);
-  const button = `[data-role="pane"][data-blockid="${blockId}"] .block-frame-minimize`;
+  const button = `[data-role="pane"][data-blockid="${blockId}"] ${control}`;
   const where = await d.eval(`(() => { const el = document.querySelector(${JSON.stringify(button)}); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-  if (!where) return { skipped: "the pane has no Minimize button" };
+  if (!where) return { skipped: `the pane has no ${control} button` };
   if (!(await d.eval(`window.__minLab.arm(${JSON.stringify(blockId)})`))) return { skipped: "the pane is not on screen" };
   await d.session.send("Profiler.enable");
   await d.session.send("Profiler.setSamplingInterval", { interval: 250 });
@@ -239,7 +243,7 @@ async function main() {
   // --rounds N alternates before, after, before, after ... (N times each), so a drift in the machine does not read as a gain.
   const variants = args.patch ? Array.from({ length: args.rounds }, (_, r) => ["before", "after"].map((v) => ({ v, key: args.rounds > 1 ? `${v}-${r + 1}` : v }))).flat() : [{ v: "before", key: "before" }];
   if (args.patch && !existsSync(args.patch)) throw new Error("--patch must name the change as a patch of the tree (git diff base..change -- frontend)");
-  const merges = 2 * args.mergeRepeat * variants.length;
+  const merges = 2 * (args.mergeRepeat + args.closeRepeat) * variants.length;
   if (merges > args.agents - 2) throw new Error(`${merges} merges need ${merges + 2} panes: raise --agents or lower --merge-repeat`);
   const script = join(args.home, "min-lab-conversation.json");
   writeFileSync(script, JSON.stringify(generateConversation({ turns: 40, seed: 1, realistic: true })));
@@ -297,6 +301,25 @@ async function main() {
           const r = await clickOnce(d, pane.blockId, false, args.restMs);
           if (!r.skipped) (results[key][`merge-${label}`] ??= []).push(r);
           else console.log(`  merge-${label}: ${r.skipped}`);
+          await sleep(2000);
+        }
+        // maximize: the same pane each time (the last), restored by a second click, which is not counted
+        for (let i = 0; i < args.maxRepeat; i++) {
+          if (busy) await startStreaming(d, panes, args.streaming);
+          const up = await clickOnce(d, chipPane.blockId, false, args.restMs, ".block-frame-magnify");
+          if (!up.skipped) (results[key][`maximize-${label}`] ??= []).push(up);
+          else console.log(`  maximize-${label}: ${up.skipped}`);
+          await sleep(1500);
+          await clickOnce(d, chipPane.blockId, false, 0, ".block-frame-magnify");
+          await sleep(1500);
+        }
+        // close: a pane of its own each time, which cannot be brought back
+        for (let i = 0; i < args.closeRepeat; i++) {
+          if (busy) await startStreaming(d, panes, args.streaming);
+          const pane = panes[next++];
+          const r = await clickOnce(d, pane.blockId, false, args.restMs, ".block-frame-default-close");
+          if (!r.skipped) (results[key][`close-${label}`] ??= []).push(r);
+          else console.log(`  close-${label}: ${r.skipped}`);
           await sleep(2000);
         }
         console.log(`${key} ${label} done`);
