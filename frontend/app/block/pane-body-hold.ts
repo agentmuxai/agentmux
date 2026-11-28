@@ -110,10 +110,16 @@ interface ContentStats {
     moves: number;
     firstMoveAt: number;
     lastMoveAt: number;
-    /** Per view kind: the catch-ups that ran mid-drag, and how far behind each body was when it caught up (ms). */
-    byView: Map<string, { n: number; behind: number[] }>;
+    /**
+     * Per view kind: the catch-ups that ran mid-drag, how far behind each body was when it caught up (ms), and what
+     * each cost the page: the time from the frame it ran in to the next frame (`after`, ms; about one frame when it
+     * cost nothing, more when its layout made the next frame late).
+     */
+    byView: Map<string, { n: number; behind: number[]; after: number[] }>;
     /** Bodies still behind when the drag ended, by how far (ms). */
     atRelease: number[];
+    /** The gap between frames that ran no catch-up (ms): what a frame is on this page, to read `after` against. */
+    frameGaps: number[];
 }
 let stats: ContentStats | null = null;
 /** When each body's frame first changed size after its last catch-up (the size observer's report). */
@@ -125,22 +131,46 @@ function noteCaughtUp(view: string, el: HTMLElement): void {
     const since = behindSince.get(el);
     behindSince.delete(el);
     if (!stats || since === undefined) return;
-    const v = stats.byView.get(view) ?? { n: 0, behind: [] };
+    const v = viewStats(stats, view);
     v.n++;
     v.behind.push(performance.now() - since);
-    stats.byView.set(view, v);
+}
+
+function viewStats(s: ContentStats, view: string): { n: number; behind: number[]; after: number[] } {
+    const have = s.byView.get(view);
+    if (have) return have;
+    const made = { n: 0, behind: [] as number[], after: [] as number[] };
+    s.byView.set(view, made);
+    return made;
+}
+
+/** Frame gaps kept for the line: a drag draws a few hundred frames at most, and a long hold must not grow the list. */
+const MAX_FRAME_GAPS = 2000;
+
+/** The frame after one that ran `run`'s catch-up began `gap` ms after it, or, with no catch-up in it, after any frame. */
+function noteFrameGap(run: CatchUp | undefined, gap: number): void {
+    if (!stats) return;
+    const body = run && bodyOf.get(run);
+    if (body) viewStats(stats, body.view).after.push(gap);
+    else if (!run && stats.frameGaps.length < MAX_FRAME_GAPS) stats.frameGaps.push(gap);
 }
 
 function logContentStats(s: ContentStats): void {
     if (s.moves < MIN_MOVES) return;
-    const views = [...s.byView].map(([view, v]) => {
-        const b = summarizeLags(v.n, v.behind);
-        return `${view}(n=${v.n} p50=${b.p50}ms worst=${b.worst}ms)`;
-    });
+    const views = [...s.byView]
+        .filter(([, v]) => v.n > 0 || v.after.length > 0)
+        .map(([view, v]) => {
+            const b = summarizeLags(v.n, v.behind);
+            const cost = summarizeLags(v.after.length, v.after);
+            const after = cost.drawn ? `; frame-after p50=${cost.p50}ms worst=${cost.worst}ms` : "";
+            return `${view}(n=${v.n} p50=${b.p50}ms worst=${b.worst}ms${after})`;
+        });
+    const frames = summarizeLags(s.frameGaps.length, s.frameGaps);
     const tail = summarizeLags(s.atRelease.length, s.atRelease);
     console.warn(
         `${PERF_LOG_PREFIX} border-content moves=${s.moves} drag=${Math.round(s.lastMoveAt - s.firstMoveAt)}ms refresh=${dragRefreshMs()}ms ` +
-            `mid-drag catch-ups ${views.length ? views.join(" ") : "none"}; behind at release ${tail.drawn}${tail.drawn ? ` worst=${tail.worst}ms` : ""}`
+            `mid-drag catch-ups ${views.length ? views.join(" ") : "none"}; behind at release ${tail.drawn}${tail.drawn ? ` worst=${tail.worst}ms` : ""}; ` +
+            `frames without one p50=${frames.p50}ms p95=${frames.p95}ms`
     );
 }
 
@@ -157,6 +187,7 @@ function clockStep(t: number): void {
     if (catchUps.size === 0) return;
     const behind = lastFrameAt > 0 && t - lastFrameAt > BEHIND_FRAME_MS;
     if (lastRan && behind && t - lastRan.at > BEHIND_FRAME_MS) heavy.add(lastRan.run);
+    if (lastFrameAt > 0) noteFrameGap(lastRan?.run, t - lastFrameAt);
     lastRan = null;
     lastFrameAt = t;
     const pace = dragRefreshMs();
@@ -189,7 +220,7 @@ function clockStep(t: number): void {
 function addCatchUp(run: CatchUp, body: { view: string; el: HTMLElement | null | undefined }): void {
     bodyOf.set(run, body);
     if (catchUps.size === 0) {
-        stats = { moves: 0, firstMoveAt: 0, lastMoveAt: 0, byView: new Map(), atRelease: [] };
+        stats = { moves: 0, firstMoveAt: 0, lastMoveAt: 0, byView: new Map(), atRelease: [], frameGaps: [] };
         lastFrameAt = 0;
         lastRoundAt = performance.now();
         lastMoveAt = lastRoundAt;
