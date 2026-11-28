@@ -21,7 +21,6 @@ use std::time::Duration;
 use serde::Serialize;
 use tokio::sync::oneshot;
 
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct UseRequest {

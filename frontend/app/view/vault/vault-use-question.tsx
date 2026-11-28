@@ -8,7 +8,7 @@
 import { createEffect, createSignal, onCleanup, Show, type Accessor, type Component, type JSX } from "solid-js";
 
 import { tip } from "@/app/element/tip";
-import { Button, Field, Pill, Select, TextInput, type SelectOption } from "@/app/element/ui";
+import { Button, Field, Select, TextInput, type SelectOption } from "@/app/element/ui";
 import { t } from "@/app/i18n/i18n";
 import { Rich } from "@/app/i18n/rich";
 import type { UseRequest } from "@/types/rpc/UseRequest";
