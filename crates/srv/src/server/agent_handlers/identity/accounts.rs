@@ -160,8 +160,7 @@ pub(super) async fn verify_account_key(
     };
     // The existing row, once (replacement path): preserves created_at and any previously stored context.
     let existing = mstore.identity_get(&account_id).ok().flatten();
-    let secret_ref = store_secret(&identity_store, &account_id, &req, existing.as_ref()).await?;
-    let made_here = is_new || existing.as_ref().is_some_and(|a| a.secret_ref != secret_ref);
+    let StoredSecret { secret_ref, created: made_here } = store_secret(&identity_store, &account_id, &req, existing.as_ref()).await?;
     let account = key_account_row(&req, &account_id, existing.as_ref(), secret_ref, probe.status, probe.metadata, &probe.masked_tail);
     if let Err(e) = mstore.identity_upsert_with_mirror(&identity_store, &account) {
         // The DB write failed after the key was stored. A key stored for a new account (or in a new Vault entry)
@@ -216,22 +215,30 @@ async fn probe_key(req: &VerifyKeyReq) -> Result<KeyProbe, AccountKeyVerifyResul
     Ok(KeyProbe { status: "valid".to_string(), metadata: outcome.metadata, masked_tail: outcome.masked_tail, valid: true })
 }
 
+struct StoredSecret {
+    secret_ref: SecretRef,
+    created: bool,
+}
+
 /// Where the key is kept: a key added to a new account goes into the Vault, as an `api-key` entry the account row points
 /// at. An account that already keeps its key in the OS keychain keeps it there (a replaced key goes to the same place),
 /// and one whose Vault entry is gone gets a new entry. Both are blocking (the keychain's sync D-Bus on Linux, the
-/// Vault's database), so they run off the async runtime worker. Returns the pointer the row keeps.
-async fn store_secret(identity_store: &Arc<Store>, account_id: &str, req: &VerifyKeyReq, existing: Option<&IdentityAccount>) -> Result<SecretRef, String> {
+/// Vault's database), so they run off the async runtime worker. Returns the pointer and whether a new entry was created.
+async fn store_secret(identity_store: &Arc<Store>, account_id: &str, req: &VerifyKeyReq, existing: Option<&IdentityAccount>) -> Result<StoredSecret, String> {
     let (vault, aid, key) = (identity_store.clone(), account_id.to_string(), req.api_key.clone());
     let (provider, name) = (req.provider.clone(), req.name.clone());
     let current = existing.map(|a| a.secret_ref.clone());
     tokio::task::spawn_blocking(move || match current {
         Some(SecretRef::Keychain { service, account }) => {
             crate::identity::secret_store::put(&aid, &key)?;
-            Ok(SecretRef::Keychain { service, account })
+            Ok(StoredSecret { secret_ref: SecretRef::Keychain { service, account }, created: false })
         }
         Some(reference @ SecretRef::Vault { .. }) => crate::backend::vault::account_key::replace(&vault, &aid, &reference, &key)
-            .or_else(|_| crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key)),
-        _ => crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key),
+            .map(|secret_ref| StoredSecret { secret_ref, created: false })
+            .or_else(|_| crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key)
+                .map(|secret_ref| StoredSecret { secret_ref, created: true })),
+        _ => crate::backend::vault::account_key::create(&vault, &aid, &provider, &name, &key)
+            .map(|secret_ref| StoredSecret { secret_ref, created: true }),
     })
     .await
     .map_err(|e| format!("account.key.verify: key task: {e}"))?
@@ -338,7 +345,8 @@ mod tests {
     async fn a_key_added_to_a_new_account_is_a_vault_entry_the_account_reads() {
         let vault = vault();
         let req = key_req(json!({ "provider": "anthropic", "name": "work" }));
-        let secret_ref = store_secret(&vault, "acct-1", &req, None).await.unwrap();
+        let StoredSecret { secret_ref, created } = store_secret(&vault, "acct-1", &req, None).await.unwrap();
+        assert!(created);
         let SecretRef::Vault { entry, .. } = &secret_ref else { panic!("expected a Vault pointer") };
         let row = vault.vault_get(entry).unwrap().expect("the entry exists");
         assert_eq!((row.kind.as_str(), row.label.as_str()), ("api-key", "anthropic account key: work"));
@@ -352,21 +360,23 @@ mod tests {
     #[tokio::test]
     async fn a_replaced_key_goes_into_the_same_entry_and_a_missing_entry_is_made_again() {
         let vault = vault();
-        let first = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap();
+        let first = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap().secret_ref;
         let mut existing = account("acct-1", json!({}));
         existing.secret_ref = first.clone();
-        let again = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-new-5678" })), Some(&existing)).await.unwrap();
+        let StoredSecret { secret_ref: again, created } = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-new-5678" })), Some(&existing)).await.unwrap();
+        assert!(!created);
         assert_eq!(again, first, "the same entry");
         assert_eq!(&**crate::backend::vault::account_key::read(&vault, "acct-1", &first).unwrap(), "sk-new-5678");
         crate::backend::vault::account_key::remove(&vault, "acct-1", &first).unwrap();
-        let remade = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-newer-9012" })), Some(&existing)).await.unwrap();
+        let StoredSecret { secret_ref: remade, created } = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "sk-newer-9012" })), Some(&existing)).await.unwrap();
+        assert!(created);
         assert_eq!(&**crate::backend::vault::account_key::read(&vault, "acct-1", &remade).unwrap(), "sk-newer-9012");
     }
 
     #[tokio::test]
     async fn a_new_accounts_entry_is_removed_when_the_row_could_not_be_saved() {
         let vault = vault();
-        let secret_ref = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap();
+        let secret_ref = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap().secret_ref;
         drop_orphaned_secret(&vault, &secret_ref, "acct-1").await;
         let SecretRef::Vault { entry, .. } = &secret_ref else { panic!("expected a Vault pointer") };
         assert!(vault.vault_get(entry).unwrap().is_none());
@@ -377,17 +387,77 @@ mod tests {
         for legacy in [false, true] {
             let vault = vault();
             let req = key_req(json!({}));
-            let first = store_secret(&vault, "acct-1", &req, None).await.unwrap();
+            let first = store_secret(&vault, "acct-1", &req, None).await.unwrap().secret_ref;
             let SecretRef::Vault { entry, .. } = &first else { panic!("expected a Vault pointer") };
             crate::backend::vault::delete(&vault, entry).unwrap();
-            let second = store_secret(&vault, "acct-2", &req, None).await.unwrap();
+            let second = store_secret(&vault, "acct-2", &req, None).await.unwrap().secret_ref;
             let mut previous = account("acct-1", json!({}));
             previous.secret_ref = if legacy { SecretRef::Vault { entry: entry.clone(), link_id: None } } else { first };
             vault.identity_upsert(&previous).unwrap();
-            let remade = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "new-test-value" })), Some(&previous)).await.unwrap();
+            let StoredSecret { secret_ref: remade, created } = store_secret(&vault, "acct-1", &key_req(json!({ "apiKey": "new-test-value" })), Some(&previous)).await.unwrap();
+            assert!(created);
             assert!(remade != second, "saving the previous account creates its own entry");
             assert!(crate::backend::vault::account_key::read(&vault, "acct-2", &second).is_ok_and(|value| &**value == "sk-secret-1234"));
             assert!(crate::backend::vault::account_key::read(&vault, "acct-1", &remade).is_ok_and(|value| &**value == "new-test-value"));
+        }
+    }
+
+    fn refuse_account_saves(store: &Store) {
+        store.hold_for_tests().execute_batch(
+            "CREATE TRIGGER refuse_account_save BEFORE INSERT ON db_accounts BEGIN SELECT RAISE(ABORT, 'forced account save failure'); END;",
+        ).unwrap();
+    }
+
+    async fn failed_legacy_save_keeps_entry(already_bound: bool) {
+        let primary = vault();
+        let vault = vault();
+        let current = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap().secret_ref;
+        let SecretRef::Vault { entry, .. } = &current else { panic!("expected a Vault pointer") };
+        let mut previous = account("acct-1", json!({}));
+        previous.secret_ref = SecretRef::Vault { entry: entry.clone(), link_id: None };
+        primary.identity_upsert_with_mirror(&vault, &previous).unwrap();
+        if already_bound {
+            assert!(crate::backend::vault::account_key::read(&vault, "acct-1", &previous.secret_ref).is_ok());
+        }
+        refuse_account_saves(&primary);
+        let result = verify_account_key(primary.clone(), vault.clone(), Arc::new(Broker::new()), json!({
+            "accountId": "acct-1", "provider": "openai", "name": "work", "apiKey": "replacement-test-value", "validate": false,
+        })).await;
+        assert!(matches!(result, Err(ref error) if error.contains("forced account save failure")));
+        assert!(primary.identity_get("acct-1").unwrap().unwrap().secret_ref == previous.secret_ref);
+        assert!(vault.identity_get("acct-1").unwrap().unwrap().secret_ref == current);
+        assert!(crate::backend::vault::account_key::read(&vault, "acct-1", &previous.secret_ref)
+            .is_ok_and(|value| &**value == "replacement-test-value"), "a failed row save must not delete the existing credential");
+    }
+
+    #[tokio::test]
+    async fn a_legacy_pointer_bound_during_replace_survives_a_failed_account_save() {
+        failed_legacy_save_keeps_entry(false).await;
+    }
+
+    #[tokio::test]
+    async fn a_legacy_pointer_bound_only_in_the_mirror_survives_a_failed_account_save() {
+        failed_legacy_save_keeps_entry(true).await;
+    }
+
+    #[tokio::test]
+    async fn a_new_or_recreated_entry_is_rolled_back_after_a_failed_account_save() {
+        for existing_account in [false, true] {
+            let primary = vault();
+            let vault = vault();
+            if existing_account {
+                let current = store_secret(&vault, "acct-1", &key_req(json!({})), None).await.unwrap().secret_ref;
+                let mut previous = account("acct-1", json!({}));
+                previous.secret_ref = current;
+                primary.identity_upsert_with_mirror(&vault, &previous).unwrap();
+                crate::backend::vault::account_key::remove(&vault, "acct-1", &previous.secret_ref).unwrap();
+            }
+            refuse_account_saves(&primary);
+            let result = verify_account_key(primary, vault.clone(), Arc::new(Broker::new()), json!({
+                "accountId": "acct-1", "provider": "openai", "name": "work", "apiKey": "replacement-test-value", "validate": false,
+            })).await;
+            assert!(matches!(result, Err(ref error) if error.contains("forced account save failure")));
+            assert!(vault.vault_count().unwrap() == 0, "only an entry created by this operation is rolled back");
         }
     }
 
