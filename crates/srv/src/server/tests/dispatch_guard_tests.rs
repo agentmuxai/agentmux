@@ -93,6 +93,45 @@ fn a_registered_agent_reaches_the_open_commands_and_the_pane_checked_ones_only()
     assert!(matches!(decide_for("agent.kill-tree", &claimed, desktop()), Verdict::Refuse(_)));
 }
 
+/// What writes into a pane, or into an agent's composer, over a connection. Each is the person's hands: typed into a pane it reads as
+/// the person's own words.
+const WINDOW_INPUT: [&str; 5] = ["blockinput", "setblocktermsize", "controllerinput", "agent.send", "agentinput"];
+
+#[test]
+fn a_connection_holding_only_the_key_cannot_type_into_a_pane() {
+    // The instance key opens `/ws`; a native agent has it in its environment. Holding it, with no agent id and no proof from the host, is not proof.
+    let key_holder = RpcContext::default();
+    for command in WINDOW_INPUT {
+        let Verdict::Refuse(why) = decide_for(command, &key_holder, desktop()) else { panic!("{command} was not refused") };
+        assert!(why.starts_with("FORBIDDEN") && why.contains(MARKER), "{command}: {why}");
+    }
+    // A proof that has lapsed is no proof either, and a claim of one does not count once the connection is an agent's.
+    let lapsed = RpcContext { operator_proven: true, operator_proof_until: Some(1), ..Default::default() };
+    let claimed = RpcContext { agent_id: "fenn".into(), operator_proven: true, ..Default::default() };
+    for command in WINDOW_INPUT {
+        assert!(matches!(decide_for(command, &lapsed, desktop()), Verdict::Refuse(_)), "{command}, lapsed");
+    }
+    for command in &WINDOW_INPUT[..4] {
+        assert!(matches!(decide_for(command, &claimed, desktop()), Verdict::Refuse(_)), "{command}, claimed");
+    }
+    // The window itself still types.
+    for command in WINDOW_INPUT {
+        assert_eq!(decide_for(command, &RpcContext::operator_for_tests(), desktop()), Verdict::Allow, "{command}");
+    }
+}
+
+#[test]
+fn an_agent_connection_writes_into_a_pane_only_through_agentinput_on_its_own_pane() {
+    // `agentinput` is the one input command an agent's connection reaches; its handler answers for the pane
+    // (`pane_caller_tests`: another agent's pane is refused, a typed message is the window's alone). The rest are refused.
+    let a = agent("fenn");
+    assert_eq!(decide_for("agentinput", &a, desktop()), Verdict::Allow);
+    for command in &WINDOW_INPUT[..4] {
+        let Verdict::Refuse(why) = decide_for(command, &a, desktop()) else { panic!("{command} was not refused") };
+        assert!(why.starts_with("FORBIDDEN") && why.contains("MuxAPI tools"), "{command}: {why}");
+    }
+}
+
 #[test]
 fn a_lapsed_proof_is_refused_with_the_words_that_prove_the_connection_again() {
     let lapsed = RpcContext { operator_proven: true, operator_proof_until: Some(1), ..Default::default() };
