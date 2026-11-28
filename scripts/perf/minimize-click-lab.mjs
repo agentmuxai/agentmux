@@ -166,6 +166,8 @@ function parseArgs(argv) {
     mergeRepeat: Number(get("--merge-repeat", 2)),
     streaming: Number(get("--streaming", 4)),
     lines: Number(get("--lines", 1500)),
+    restMs: Number(get("--rest-ms", 0)),
+    rounds: Number(get("--rounds", 1)),
   };
 }
 
@@ -201,7 +203,7 @@ async function fillTranscripts(d, lines) {
 }
 
 /** One measurement: a click on the Minimize (or Restore) button of the pane `blockId`. */
-async function clickOnce(d, blockId, chip) {
+async function clickOnce(d, blockId, chip, restMs = 0) {
   if ((await d.eval("document.visibilityState")) !== "visible") throw new Error("the lab window is hidden (minimized or covered): it paints no frames, so nothing can be measured");
   await d.eval(PROBE);
   const button = `[data-role="pane"][data-blockid="${blockId}"] .block-frame-minimize`;
@@ -213,6 +215,8 @@ async function clickOnce(d, blockId, chip) {
   await d.session.send("Profiler.start");
   const modifiers = chip ? SHIFT : 0;
   await d.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: where.x, y: where.y });
+  // A person rests the pointer on the button before the click; a pane's drag picture starts after 250 ms of rest.
+  if (restMs > 0) await sleep(restMs);
   await d.session.send("Input.dispatchMouseEvent", { type: "mousePressed", x: where.x, y: where.y, button: "left", clickCount: 1, modifiers });
   await d.session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: where.x, y: where.y, button: "left", clickCount: 1, modifiers });
   await sleep(WATCH_MS);
@@ -232,7 +236,8 @@ async function main() {
   mkdirSync(args.out, { recursive: true });
   const port = findInstancePort(args.home);
   if (!port) throw new Error(`no running dev build is using ${args.home}`);
-  const variants = args.patch ? ["before", "after"] : ["before"];
+  // --rounds N alternates before, after, before, after ... (N times each), so a drift in the machine does not read as a gain.
+  const variants = args.patch ? Array.from({ length: args.rounds }, (_, r) => ["before", "after"].map((v) => ({ v, key: args.rounds > 1 ? `${v}-${r + 1}` : v }))).flat() : [{ v: "before", key: "before" }];
   if (args.patch && !existsSync(args.patch)) throw new Error("--patch must name the change as a patch of the tree (git diff base..change -- frontend)");
   const merges = 2 * args.mergeRepeat * variants.length;
   if (merges > args.agents - 2) throw new Error(`${merges} merges need ${merges + 2} panes: raise --agents or lower --merge-repeat`);
@@ -271,16 +276,16 @@ async function main() {
   let next = 0; // the next pane a merge may use
   const results = {};
   try {
-    for (const variant of variants) {
+    for (const { v: variant, key } of variants) {
       await setVariant(variant);
-      results[variant] = {};
+      results[key] = {};
       for (const [busy, label] of [[false, "idle"], [true, "busy"]]) {
         // chip: minimize and restore the same pane, so it is repeatable
         const chipPane = panes[panes.length - 1];
         for (let i = 0; i < args.repeat; i++) {
           if (busy) await startStreaming(d, panes, args.streaming);
-          const down = await clickOnce(d, chipPane.blockId, true);
-          if (!down.skipped) (results[variant][`chip-${label}`] ??= []).push(down);
+          const down = await clickOnce(d, chipPane.blockId, true, args.restMs);
+          if (!down.skipped) (results[key][`chip-${label}`] ??= []).push(down);
           else console.log(`  chip-${label}: ${down.skipped}`);
           await sleep(1500);
           await clickOnce(d, chipPane.blockId, false); // restore, not counted
@@ -289,12 +294,12 @@ async function main() {
         for (let i = 0; i < args.mergeRepeat; i++) {
           if (busy) await startStreaming(d, panes, args.streaming);
           const pane = panes[next++];
-          const r = await clickOnce(d, pane.blockId, false);
-          if (!r.skipped) (results[variant][`merge-${label}`] ??= []).push(r);
+          const r = await clickOnce(d, pane.blockId, false, args.restMs);
+          if (!r.skipped) (results[key][`merge-${label}`] ??= []).push(r);
           else console.log(`  merge-${label}: ${r.skipped}`);
           await sleep(2000);
         }
-        console.log(`${variant} ${label} done`);
+        console.log(`${key} ${label} done`);
         writeFileSync(join(args.out, "minimize-click-lab.json"), JSON.stringify({ args, port, results }, null, 1));
       }
     }
