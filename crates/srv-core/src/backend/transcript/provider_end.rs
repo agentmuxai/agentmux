@@ -123,6 +123,16 @@ fn index_zone(zone: &dyn Zone, sid: &str, index: &mut StoreIndex) -> Result<(), 
     Ok(())
 }
 
+/// When anything the session holds was last written, as ms since the epoch: the newest of its session file and every
+/// file under its folder. `None` when it has no file.
+pub fn newest_modified_ms(files: &SessionFiles) -> Option<i64> {
+    let stamp = |p: &Path| -> Option<i64> {
+        let t = std::fs::metadata(p).ok()?.modified().ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
+    };
+    members(files).ok()?.iter().filter_map(|m| stamp(&m.path)).max()
+}
+
 /// A session id that names a file safely: letters, digits, `-` and `_`, and no longer than a path part needs.
 fn valid_sid(sid: &str) -> bool {
     (8..=80).contains(&sid.len()) && sid.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
@@ -355,10 +365,17 @@ pub struct Outcome {
     pub removed_files: usize,
 }
 
-/// Prove, import, verify and remove one session's files. `erase` is called for each file after it is overwritten and
+/// Prove, import, verify and remove one session's files. `before_remove` runs after the verify and before any file is
+/// touched: an `Err` stops with nothing removed, and what it returns is kept until the removal is done. `erase` is called for each file after it is overwritten and
 /// before it is unlinked (a test's hook; pass a no-op otherwise). Nothing is removed unless every record and file is
 /// matched or read back equal; an `Err` has removed nothing.
-pub fn end_session(files: &SessionFiles, read: &[&dyn Zone], zone: &dyn Zone, erase: &mut dyn FnMut(&Path, u64)) -> Result<Outcome, String> {
+pub fn end_session(
+    files: &SessionFiles,
+    read: &[&dyn Zone],
+    zone: &dyn Zone,
+    before_remove: &mut dyn FnMut() -> Result<Box<dyn std::any::Any>, String>,
+    erase: &mut dyn FnMut(&Path, u64),
+) -> Result<Outcome, String> {
     require_open_matching(&withhold::health().mode)?;
     let members = members(files)?;
     let index = index_store(read, &files.sid)?;
@@ -373,6 +390,9 @@ pub fn end_session(files: &SessionFiles, read: &[&dyn Zone], zone: &dyn Zone, er
     }
     import(files, zone, &proofs)?;
     verify(files, zone, &proofs)?;
+    // The caller's last word, held until the files are gone: it may refuse (nothing is removed) or return what it
+    // holds across the removal.
+    let _held = before_remove()?;
     let removed = remove_proved(files, &raw, erase)?;
     let mut out = Outcome { files: members.len(), removed_files: removed, ..Default::default() };
     for p in &proofs {

@@ -20,10 +20,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::backend::continuity_segments::{self as segs, Segment};
+use crate::registry::LeaseStore;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::transcript::provider_end::{end_session, FsZone, SessionFiles, Zone};
+use crate::backend::transcript::provider_end::{end_session, newest_modified_ms, FsZone, SessionFiles, Zone};
 
 /// The sweep's switch: off until the migration turns it on.
 pub const KEY_SWEEP: &str = "history:sessionfilesweep";
@@ -76,6 +78,43 @@ impl Roots {
     }
 }
 
+/// What keeps an agent from starting while its session files are removed: the agent's single-live-instance lease,
+/// taken for the removal only. An agent that is running (or starting) holds it, so its sessions are not touched.
+pub struct Admission {
+    store: Arc<LeaseStore>,
+    boot: Arc<str>,
+}
+
+/// A lease held for the removal; let go on drop.
+struct Held {
+    store: Arc<LeaseStore>,
+    lease: crate::registry::Lease,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        let _ = self.store.release(&self.lease);
+    }
+}
+
+impl Admission {
+    /// `None` when there is no lease store (no shared registry): nothing can then be proved safe, so nothing is swept.
+    pub fn new(registry: Option<Arc<crate::registry::Registry>>) -> Option<Self> {
+        Some(Self { store: crate::backend::agent_admission::lease_store_for(registry)?, boot: Arc::from(format!("provider-sweep-{}", uuid::Uuid::new_v4())) })
+    }
+
+    #[cfg(test)]
+    fn with_store(store: Arc<LeaseStore>) -> Self {
+        Self { store, boot: Arc::from("provider-sweep-test") }
+    }
+
+    fn hold(&self, uid: &str) -> Option<Held> {
+        let info = crate::backend::agent_admission::claimant_info();
+        let lease = self.store.claim_as(uid, &self.boot, "provider-sweep", None, &info).ok()?;
+        Some(Held { store: Arc::clone(&self.store), lease })
+    }
+}
+
 /// Why a session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reason {
@@ -104,11 +143,6 @@ fn definition_of(s: &Segment) -> Option<String> {
     crate::backend::agent_session::is_valid_definition_id(id).then(|| id.to_string())
 }
 
-fn modified_ms(path: &Path) -> Option<i64> {
-    let t = std::fs::metadata(path).ok()?.modified().ok()?;
-    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
-}
-
 /// The agent's ended sessions whose file is there, from its segments (oldest first).
 pub fn ended_sessions(uid: &str, segments: &[Segment], roots: &Roots, policy: &Policy, now_ms: i64) -> Vec<Ended> {
     let Some(newest) = segments.iter().rev().find_map(|s| s.start.provider_session_id.clone()) else { return Vec::new() };
@@ -123,7 +157,8 @@ pub fn ended_sessions(uid: &str, segments: &[Segment], roots: &Roots, policy: &P
         if !roots.owns(&config_dir) || !seen.insert((config_dir, s.start.cwd.clone(), sid.to_string())) {
             continue;
         }
-        let Some(written) = modified_ms(&file) else { continue };
+        let Some(project_dir) = file.parent().map(Path::to_path_buf) else { continue };
+        let Some(written) = SessionFiles::at(&project_dir, sid).as_ref().and_then(newest_modified_ms) else { continue };
         if now_ms - written < GRACE_MS {
             continue;
         }
@@ -134,7 +169,6 @@ pub fn ended_sessions(uid: &str, segments: &[Segment], roots: &Roots, policy: &P
         } else {
             continue;
         };
-        let Some(project_dir) = file.parent().map(Path::to_path_buf) else { continue };
         out.push(Ended { agent_uid: uid.to_string(), definition_id: def, sid: sid.to_string(), project_dir, reason });
     }
     out
@@ -171,7 +205,7 @@ fn provider_zone(uid: &str) -> Option<String> {
 }
 
 /// End the sessions of one agent. Every failure is counted and logged and removes nothing.
-fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms: i64, report: &mut Report) {
+fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms: i64, admit: &Admission, report: &mut Report) {
     let Some(write_zone) = provider_zone(uid) else { return };
     for e in ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms) {
         report.ended += 1;
@@ -179,7 +213,16 @@ fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms
         let zone_names = conversation_zones(fs, &e.definition_id);
         let read: Vec<FsZone> = zone_names.iter().map(|z| FsZone { fs, zone: z }).collect();
         let read: Vec<&dyn Zone> = read.iter().map(|z| z as &dyn Zone).collect();
-        match end_session(&files, &read, &FsZone { fs, zone: &write_zone }, &mut |_, _| {}) {
+        // After the proof and the import, and before any file is touched: hold the agent's lease, so it cannot
+        // resume this session now, and look again under it that the session is still ended.
+        let mut admit_removal = || -> Result<Box<dyn std::any::Any>, String> {
+            let held = admit.hold(uid).ok_or_else(|| "the agent is running or starting".to_string())?;
+            if !ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms).iter().any(|x| x.sid == e.sid) {
+                return Err("the session is in use again".to_string());
+            }
+            Ok(Box::new(held))
+        };
+        match end_session(&files, &read, &FsZone { fs, zone: &write_zone }, &mut admit_removal, &mut |_, _| {}) {
             Ok(o) => {
                 report.removed_files += o.removed_files;
                 report.imported_records += o.imported_records;
@@ -207,23 +250,23 @@ fn agent_uids(fs: &FileStore) -> Vec<String> {
 }
 
 /// End every ended session, when the policy is on. A pass that is not enabled reads nothing and removes nothing.
-pub fn sweep(fs: &FileStore, roots: &Roots, policy: &Policy, now_ms: i64) -> Report {
+pub fn sweep(fs: &FileStore, roots: &Roots, policy: &Policy, now_ms: i64, admit: &Admission) -> Report {
     let mut report = Report::default();
     if !policy.enabled {
         return report;
     }
     for uid in agent_uids(fs) {
         report.agents += 1;
-        sweep_agent(fs, &uid, roots, policy, now_ms, &mut report);
+        sweep_agent(fs, &uid, roots, policy, now_ms, admit, &mut report);
     }
     report
 }
 
 /// [`sweep`] over the global transcript store, where the segment logs, the conversation zones and the agent's provider
 /// zone live (the per-channel store holds none of them). `None` when there is no global store: nothing is swept then.
-pub fn sweep_global(roots: &Roots, policy: &Policy, now_ms: i64) -> Option<Report> {
+pub fn sweep_global(roots: &Roots, policy: &Policy, now_ms: i64, registry: Option<Arc<crate::registry::Registry>>) -> Option<Report> {
     let global = crate::backend::agent_session::global_transcript_store()?;
-    Some(sweep(global, roots, policy, now_ms))
+    Some(sweep(global, roots, policy, now_ms, &Admission::new(registry)?))
 }
 
 #[cfg(test)]
