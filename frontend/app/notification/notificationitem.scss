@@ -56,6 +56,25 @@
         white-space: pre-line;
     }
 
+    // "Closing in 7 s." and the bar that shrinks to nothing over the toast's countdown (toast-countdown.tsx).
+    .toast-countdown {
+        margin-top: 8px;
+        font-size: var(--text-xs);
+        opacity: 0.8;
+    }
+
+    .toast-countdown-bar {
+        height: 2px;
+        margin-top: 4px;
+        background: currentColor;
+        transform-origin: left center;
+        animation: am-shrink-x linear forwards;
+
+        &.toast-countdown-bar--held {
+            animation-play-state: paused;
+        }
+    }
+
     .notification-actions {
         display: flex;
         gap: 10px;

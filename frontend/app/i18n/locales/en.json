@@ -11,6 +11,7 @@
     "files.tree.close": "Close {{name}}",
     "files.filter.clear": "Clear filter",
     "files.filter.nomatch": "Nothing here matches “{{filter}}”.",
+    "toast.countdown": "Closing in {{seconds}} s.",
     "files.empty.hidden": "Only hidden files here.",
     "files.empty.folder": "This folder is empty.",
     "files.find.deep": "Search subfolders too",

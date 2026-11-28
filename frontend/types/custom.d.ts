@@ -1301,6 +1301,9 @@ declare global {
         /** Stays until the user closes it: no expiry, and a pin on the toast
          *  says so. Needs an `id`. */
         persistent?: boolean;
+        /** The toast closes itself this many ms after it appears and shows the seconds left and a shrinking bar
+         *  (toast-countdown.tsx). It holds while the pointer or focus is on it, and starts again from the top when both leave. */
+        countdown?: number;
         /** An action toast that still goes at `expiration` (an action toast otherwise never expires), and waits
          *  while the pointer is over it. For a notice that a list elsewhere keeps. */
         expiresWithActions?: boolean;

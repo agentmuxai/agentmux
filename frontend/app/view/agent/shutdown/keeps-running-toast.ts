@@ -16,6 +16,7 @@
  */
 
 import { errorDetail } from "@/app/notification/toast-debug";
+import { TOAST_COUNTDOWN_MS } from "@/app/notification/toast-live";
 import { setNotificationAction } from "@/app/notification/usenotification";
 import { isParkedMeta } from "@/app/store/agent-parked";
 import { openAgentInActiveTab, sharedAgentRuntime } from "@/app/store/agent-runtime-live";
@@ -225,7 +226,8 @@ export function noteKeepsRunning(agents: ParkedAgent[]): void {
         message: KEEPS_RUNNING_NOTE,
         timestamp: new Date().toISOString(),
         type: "info",
-        expiration: Date.now() + 8000,
+        // It closes itself after the countdown (the agent keeps running; My Agents lists it) and says when.
+        countdown: TOAST_COUNTDOWN_MS,
         actions: [{ label: "Open", actionKey }, button(agents, "shutdown", "Shutdown", () => void recheck(agents, agents, [], ask))],
     });
 }

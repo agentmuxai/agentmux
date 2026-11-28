@@ -12,6 +12,7 @@ import clsx from "clsx";
 import { For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { CopyDetailsButton, useCopyFeedback } from "./copy-details-button";
 
+import { ToastCountdownLine, useToastHold } from "./toast-countdown";
 import "./notificationitem.scss";
 import { tip } from "@/app/element/tip";
 
@@ -71,10 +72,14 @@ const NotificationItem = ({
     const { id, title, titleColor, message, icon, type, timestamp, persistent, actions } = notification;
     const color = type === "error" ? "red" : type === "warning" ? "yellow" : "green";
     const nIcon = icon ? icon : "bell";
-    // Hovering and keyboard focus each pause the toast's expiry; it resumes only when neither holds.
-    let hovering = false;
-    let focused = false;
-    const syncPause = () => (hovering || focused ? onMouseEnter?.() : onMouseLeave?.());
+    // Hovering and keyboard focus each pause the toast's expiry; it resumes only when neither holds. A toast with a
+    // countdown closes itself when it runs out (a toast in the list, not a bubble, has none).
+    const hold = useToastHold({
+        countdownMs: isBubble ? notification.countdown : undefined,
+        onRemove: () => onRemove(id),
+        onHold: onMouseEnter,
+        onRelease: onMouseLeave,
+    });
     let root: HTMLDivElement | undefined;
     const { copied, copy } = useCopyFeedback(() => onCopy(id));
     if (isBubble) useToastLife(() => root, notification.debug?.blockId);
@@ -104,25 +109,12 @@ const NotificationItem = ({
         <div
             ref={root}
             class={clsx(isBubble ? "notification-bubble" : "notification", className)}
-            onMouseEnter={() => {
-                hovering = true;
-                syncPause();
-            }}
-            onMouseLeave={() => {
-                hovering = false;
-                syncPause();
-            }}
-            onFocusIn={() => {
-                focused = true;
-                syncPause();
-            }}
-            onFocusOut={(e) => {
-                // Focus moving between this toast's own buttons is still focus inside it.
-                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-                focused = false;
-                syncPause();
-            }}
+            onMouseEnter={hold.hoverIn}
+            onMouseLeave={hold.hoverOut}
+            onFocusIn={hold.focusIn}
+            onFocusOut={hold.focusOut}
             onClick={copy}
+            onKeyDown={hold.keyDown}
         >
             {renderCloseButton()}
             <CopyDetailsButton copied={copied()} onCopy={copy} />
@@ -144,6 +136,9 @@ const NotificationItem = ({
                     </Show>
                     <Show when={message}>
                         <div class="notification-message">{message}</div>
+                    </Show>
+                    <Show when={isBubble && notification.countdown}>
+                        <ToastCountdownLine countdown={hold.countdown} ms={notification.countdown} />
                     </Show>
                     <Show when={actions && actions.length > 0}>
                         <div class="notification-actions">
