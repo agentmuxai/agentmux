@@ -10,6 +10,7 @@ pub mod counting;
 pub mod damage;
 pub mod framer;
 pub mod images;
+pub mod live;
 pub mod origin_ledger;
 pub mod origin_resign;
 pub mod origin_sig;
