@@ -223,8 +223,8 @@ export async function copyVaultPart(id: string, part: string, label: string): Pr
 
 export type UseDecision = "once" | "always" | "deny";
 
-/** The person's answer to an agent's use of an entry; srv takes it only from the host. `rows` are the rows of a
- *  batch left ticked, by their place in its list; `share` is whether an import's share was left ticked. */
+/** The person's answer to an agent's use of an entry; srv takes it only from the host.
+ *  `share` is whether an import's share was left ticked. */
 export const answerUse = (id: string, decision: UseDecision, typed?: { value: string; save: boolean }, card?: string, share?: boolean) =>
     call<unknown>("answer_use", { id, decision, ...(typed ? { value: typed.value, save: typed.save } : {}), ...(card ? { choice: card } : {}), ...(share === undefined ? {} : { share }) });
 /** The person is reading or acting in use `id`'s prompt: srv holds its countdown. */
