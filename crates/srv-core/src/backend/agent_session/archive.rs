@@ -219,10 +219,14 @@ fn archive_global_current(gfs: &FileStore, definition_id: &str, before_move: imp
         return Ok(GlobalArchive::Nothing);
     }
     // What a kill left in the live file belongs to this conversation, not the next one.
-    crate::backend::transcript::live::settle(gfs, &current_zone);
+    let settled = crate::backend::transcript::live::settle(gfs, &current_zone);
     before_move();
 
-    let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
+    let mut files = vec![SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
+    if !settled {
+        // The leftover could not be put in the conversation: it goes to the archive with it, not to the next one.
+        files.push(crate::backend::transcript::live::LIVE_FILE);
+    }
     // The store is shared by every instance on the machine. The files are
     // moved, not copied, so only one archive can take them; another instance
     // can still take the free name between the check and the move.

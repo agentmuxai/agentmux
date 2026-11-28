@@ -232,6 +232,25 @@ fn archiving_after_a_kill_keeps_the_leftover_with_its_own_conversation() {
 }
 
 #[test]
+fn a_cut_off_reply_the_shared_zone_failed_to_keep_is_recovered_from_the_other_copy() {
+    let e = env("blk-10");
+    for l in [user("go"), start("m1"), block(0, json!({ "type": "text", "text": "" })), text_delta(0, "kept only in the block's copy")] {
+        e.write(None, &[l]);
+    }
+    e.gfs.delete_file(ZONE, LIVE_FILE).unwrap(); // the shared zone's live write had failed
+    forget("blk-10");
+    e.write(None, &[init()]);
+    assert_eq!(kinds(&e.output()), vec!["user", "assistant", "system"]);
+    assert!(e.output().contains("kept only in the block's copy"));
+}
+
+#[test]
+fn settling_a_zone_with_no_live_file_is_a_success() {
+    let e = env("blk-11");
+    assert!(settle(&e.gfs, ZONE));
+}
+
+#[test]
 fn a_write_without_an_agent_stream_is_not_split() {
     let fs = Arc::new(FileStore::open_in_memory().unwrap());
     let frag = start("m1");

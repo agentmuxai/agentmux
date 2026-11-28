@@ -173,25 +173,31 @@ fn leftovers_of(fs: &FileStore, zone: &str) -> Option<Vec<u8>> {
 
 /// Settle a zone's live file before its conversation leaves the zone (an archive moves `output` away): what a kill
 /// left becomes lines of `output`, and the file is emptied. A leftover left in place would be recovered into the next
-/// conversation's `output` as a cut-off reply it never had. A failure to append leaves the live file as it is.
-pub(crate) fn settle(fs: &FileStore, zone: &str) {
-    let Some(left) = leftovers_of(fs, zone) else { return };
+/// conversation's `output` as a cut-off reply it never had. `false` when the leftover could not be appended: the
+/// live file is then left as it is, and the archive takes it along with the conversation it belongs to.
+pub(crate) fn settle(fs: &FileStore, zone: &str) -> bool {
+    let Some(left) = leftovers_of(fs, zone) else { return true };
     if !left.is_empty() {
         if let Err(e) = fs.append_data(zone, OUTPUT_FILE, &left) {
             tracing::warn!(zone = %zone, error = %e, "transcript live file: settling before archive failed");
-            return;
+            return false;
         }
     }
-    if let Err(e) = fs.delete_file(zone, LIVE_FILE) {
-        tracing::warn!(zone = %zone, error = %e, "transcript live file: clearing failed");
+    match fs.delete_file(zone, LIVE_FILE) {
+        Ok(()) | Err(StoreError::NotFound) => true,
+        Err(e) => {
+            tracing::warn!(zone = %zone, error = %e, "transcript live file: clearing failed");
+            false
+        }
     }
 }
 
 /// The first call for a block in this process: what a kill left in its live file, as lines for
 /// `output` (possibly none), after which the live files are emptied. `None` on every later call,
-/// and when there is nothing to recover. The first target (the shared zone, when there is one) is the
-/// one that is read: a copy left in another target after the first was emptied (an archive settles the
-/// shared zone) is stale, and is only emptied.
+/// and when there is nothing to recover. The first target (the shared zone, when there is one) is read first.
+/// A copy in a later target counts only while the first still holds its conversation: after an archive the
+/// shared zone holds none, and what a later target has left is stale (the old conversation's), so it is only
+/// emptied. A cut-off reply the shared zone failed to keep is still recovered from the other copy.
 pub(crate) fn recover_once(block_id: &str, targets: &[(Arc<FileStore>, String)]) -> Option<Vec<u8>> {
     {
         let mut states = STATES.lock().unwrap_or_else(|e| e.into_inner());
@@ -201,7 +207,10 @@ pub(crate) fn recover_once(block_id: &str, targets: &[(Arc<FileStore>, String)])
         }
     }
     let (fs, zone) = targets.first()?;
-    let found = leftovers_of(fs, zone);
+    let found = leftovers_of(fs, zone).or_else(|| {
+        let holds = fs.stat(zone, OUTPUT_FILE).ok().flatten().is_some_and(|f| f.size > 0);
+        if holds { targets[1..].iter().find_map(|(fs, zone)| leftovers_of(fs, zone)) } else { None }
+    });
     clear(targets);
     found
 }

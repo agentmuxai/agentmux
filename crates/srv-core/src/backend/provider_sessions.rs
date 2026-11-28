@@ -223,6 +223,9 @@ pub fn ended_sessions(uid: &str, segments: &[Segment], roots: &Roots, policy: &P
     out
 }
 
+/// Why a removal was left for later: not a failure.
+const RUNNING: &str = "the agent is running or starting";
+
 /// What a sweep did, in counts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Report {
@@ -231,6 +234,8 @@ pub struct Report {
     pub removed_files: usize,
     pub imported_records: usize,
     pub imported_files: usize,
+    /// Left for later: the agent is running or starting.
+    pub skipped: usize,
     pub failed: usize,
 }
 
@@ -256,8 +261,15 @@ fn provider_zone(uid: &str) -> Option<String> {
 /// End the sessions of one agent. Every failure is counted and logged and removes nothing.
 fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms: i64, admit: &Admission, report: &mut Report) {
     let Some(write_zone) = provider_zone(uid) else { return };
-    for e in ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms) {
-        report.ended += 1;
+    let ended = ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms);
+    report.ended += ended.len();
+    // An agent that is running holds its lease: look before the proof, which is the long part.
+    if !ended.is_empty() && admit.hold(uid).is_none() {
+        report.skipped += ended.len();
+        tracing::debug!(agent = %uid, sessions = ended.len(), "provider session sweep: the agent is running or starting");
+        return;
+    }
+    for e in ended {
         let Some(files) = SessionFiles::at(&e.project_dir, &e.sid) else { continue };
         let zone_names = conversation_zones(fs, &e.definition_id);
         let read: Vec<FsZone> = zone_names.iter().map(|z| FsZone { fs, zone: z }).collect();
@@ -265,7 +277,7 @@ fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms
         // After the proof and the import, and before any file is touched: hold the agent's lease, so it cannot
         // resume this session now, and look again under it that the session is still ended.
         let mut admit_removal = || -> Result<Box<dyn Hold>, String> {
-            let held = admit.hold(uid).ok_or_else(|| "the agent is running or starting".to_string())?;
+            let held = admit.hold(uid).ok_or_else(|| RUNNING.to_string())?;
             if !ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms).iter().any(|x| x.sid == e.sid) {
                 return Err("the session is in use again".to_string());
             }
@@ -277,6 +289,10 @@ fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms
                 report.imported_records += o.imported_records;
                 report.imported_files += o.imported_files;
                 tracing::info!(agent = %uid, session = %e.sid, reason = ?e.reason, files = o.files, records = o.records, matched = o.matched, imported_records = o.imported_records, imported_files = o.imported_files, "provider session ended");
+            }
+            Err(err) if err == RUNNING => {
+                report.skipped += 1;
+                tracing::debug!(agent = %uid, session = %e.sid, "provider session sweep: the agent started meanwhile");
             }
             Err(err) => {
                 report.failed += 1;
