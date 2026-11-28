@@ -249,3 +249,57 @@ fn a_store_line_of_another_session_does_not_match() {
     let out = e.end().unwrap();
     assert_eq!((out.matched, out.imported_records), (0, 1));
 }
+
+#[test]
+fn a_secret_in_a_spill_file_is_masked_in_the_import() {
+    let secret = "spill-secret-value-for-provider-test-77c";
+    super::super::withhold::hold("provider-spill", secret, None);
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    e.write(&format!("{SID}/tool-results/spill.txt"), &format!("before {secret} after"));
+    let out = e.end();
+    super::super::withhold::release("provider-spill");
+    assert_eq!(out.unwrap().imported_files, 1);
+    let imported = e.text(&import_name(SID, "session/tool-results/spill.txt"));
+    assert!(!imported.contains(secret) && imported.contains(super::super::withhold::MARK), "{imported}");
+}
+
+#[test]
+fn a_file_that_is_not_text_and_holds_a_secret_is_refused_and_nothing_is_removed() {
+    let secret = "binary-secret-value-for-provider-test-5d1";
+    super::super::withhold::hold("provider-bin", secret, None);
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    let mut bytes = vec![0xffu8, 0xfe];
+    bytes.extend_from_slice(secret.as_bytes());
+    e.write(&format!("{SID}/blob.bin"), "");
+    std::fs::write(e.files().folder.join("blob.bin"), bytes).unwrap();
+    let r = e.end();
+    super::super::withhold::release("provider-bin");
+    assert!(r.is_err());
+    assert!(e.files().jsonl.exists() && e.files().folder.join("blob.bin").exists());
+}
+
+#[test]
+fn a_file_that_changed_after_the_proof_is_not_removed() {
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    let files = e.files();
+    let proved = vec![(files.jsonl.clone(), file_digest(&files.jsonl).unwrap())];
+    // A record appended after the proof read the file.
+    let mut f = std::fs::OpenOptions::new().append(true).open(&files.jsonl).unwrap();
+    f.write_all(b"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"late\"}}\n").unwrap();
+    drop(f);
+    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    assert!(r.is_err() && files.jsonl.exists());
+    // A file that was added.
+    e.write(&format!("{SID}/new.txt"), "x");
+    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    assert!(r.is_err() && files.folder.join("new.txt").exists());
+}
+
+#[test]
+fn nothing_is_read_while_secret_matching_is_closed() {
+    assert!(require_open_matching("closed").is_err());
+    assert!(require_open_matching("pattern").is_ok() && require_open_matching("none").is_ok());
+}

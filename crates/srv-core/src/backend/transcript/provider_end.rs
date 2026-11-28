@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::provider::{record, sidecar_fields, Matcher, Record, StoreIndex};
+use super::withhold;
 use crate::backend::agent_session::OUTPUT_FILE;
 
 /// The file in a zone that keeps what the provider's matched records carry beyond the store's lines.
@@ -100,10 +101,12 @@ pub fn index_store(zone: &dyn Zone, sid: &str) -> Result<StoreIndex, String> {
         }
         at += part.len() as u64;
         carry.extend_from_slice(&part);
-        while let Some(end) = carry.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = carry.drain(..=end).collect();
-            index.add_line(sid, &String::from_utf8_lossy(&line[..line.len() - 1]));
+        let mut start = 0;
+        while let Some(i) = carry[start..].iter().position(|b| *b == b'\n') {
+            index.add_line(sid, &String::from_utf8_lossy(&carry[start..start + i]));
+            start += i + 1;
         }
+        carry.drain(..start);
     }
     if !carry.is_empty() {
         index.add_line(sid, &String::from_utf8_lossy(&carry));
@@ -185,10 +188,14 @@ struct FileProof {
     sidecar: Vec<(usize, Value)>,
     /// The file is not UTF-8 line records: it is imported whole.
     whole: bool,
+    /// What an import of the whole file writes, as size and digest (masked as the store masks).
+    want: Option<Sum>,
 }
 
+type Sum = (u64, [u8; 32]);
+
 fn prove_lines(m: &Member, index: &StoreIndex) -> Result<FileProof, String> {
-    let mut proof = FileProof { rel: m.rel.clone(), path: m.path.clone(), records: 0, matched: 0, unmatched: Vec::new(), sidecar: Vec::new(), whole: false };
+    let mut proof = FileProof { rel: m.rel.clone(), path: m.path.clone(), records: 0, matched: 0, unmatched: Vec::new(), sidecar: Vec::new(), whole: false, want: None };
     let mut reader = BufReader::new(std::fs::File::open(&m.path).map_err(|e| e.to_string())?);
     let mut matcher = Matcher::new(index);
     let mut buf = Vec::new();
@@ -206,8 +213,7 @@ fn prove_lines(m: &Member, index: &StoreIndex) -> Result<FileProof, String> {
             continue;
         }
         let Ok(text) = std::str::from_utf8(&buf) else {
-            proof.whole = true;
-            return Ok(proof);
+            return whole_proof(m);
         };
         proof.records += 1;
         let r: Record = record(n, text);
@@ -235,7 +241,38 @@ fn lines_set(bytes: &[u8]) -> HashSet<String> {
     String::from_utf8_lossy(bytes).split('\n').filter(|l| !l.is_empty()).map(str::to_string).collect()
 }
 
-fn file_digest(path: &Path) -> Result<(u64, [u8; 32]), String> {
+/// A file imported whole is read into memory, so a file past this is not imported (and its session not removed).
+const MAX_WHOLE_BYTES: u64 = 256 << 20;
+
+/// What an import of a whole file writes: the bytes with a value srv holds secret replaced by its mark. A file that is
+/// not UTF-8 cannot be masked, so one that holds a secret in any spelling is refused rather than written in clear.
+fn imported_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    if std::fs::metadata(path).map_err(|e| e.to_string())?.len() > MAX_WHOLE_BYTES {
+        return Err("a file of the session is too large to import whole".to_string());
+    }
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(withhold::text(&text).into_owned().into_bytes()),
+        Err(e) => {
+            let bytes = e.into_bytes();
+            if withhold::holds(&String::from_utf8_lossy(&bytes)) {
+                return Err("a file that is not text holds a value that is withheld".to_string());
+            }
+            Ok(bytes)
+        }
+    }
+}
+
+fn bytes_digest(bytes: &[u8]) -> Sum {
+    (bytes.len() as u64, Sha256::digest(bytes).into())
+}
+
+fn whole_proof(m: &Member) -> Result<FileProof, String> {
+    let want = bytes_digest(&imported_bytes(&m.path)?);
+    Ok(FileProof { rel: m.rel.clone(), path: m.path.clone(), records: 0, matched: 0, unmatched: Vec::new(), sidecar: Vec::new(), whole: true, want: Some(want) })
+}
+
+fn file_digest(path: &Path) -> Result<Sum, String> {
     let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
     let mut h = Sha256::new();
     let mut buf = vec![0u8; 1 << 20];
@@ -250,7 +287,7 @@ fn file_digest(path: &Path) -> Result<(u64, [u8; 32]), String> {
     }
 }
 
-fn zone_digest(zone: &dyn Zone, name: &str) -> Result<(u64, [u8; 32]), String> {
+fn zone_digest(zone: &dyn Zone, name: &str) -> Result<Sum, String> {
     let size = zone.size(name)?;
     let mut h = Sha256::new();
     let mut at = 0;
@@ -267,20 +304,10 @@ fn zone_digest(zone: &dyn Zone, name: &str) -> Result<(u64, [u8; 32]), String> {
 
 /// Write a file's bytes whole under `name`, replacing what is there.
 fn import_whole(zone: &dyn Zone, name: &str, path: &Path) -> Result<(), String> {
+    let bytes = imported_bytes(path)?;
     zone.delete(name)?;
-    let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut buf = vec![0u8; CHUNK as usize];
-    let mut any = false;
-    loop {
-        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        any = true;
-        zone.append(name, &buf[..n])?;
-    }
-    if !any {
-        zone.append(name, b"")?;
+    for part in bytes.chunks(CHUNK as usize) {
+        zone.append(name, part)?;
     }
     Ok(())
 }
@@ -300,6 +327,14 @@ fn sidecar_line(sid: &str, rel: &str, n: usize, fields: &Value) -> String {
     json!({ "s": sid, "f": rel, "n": n, "fields": fields }).to_string()
 }
 
+/// While secret matching is closed every line reads as the mark: nothing may be proved or imported then.
+fn require_open_matching(mode: &str) -> Result<(), String> {
+    if mode == "closed" {
+        return Err("secret matching is closed: no provider file is read".to_string());
+    }
+    Ok(())
+}
+
 /// What the end of a session did, in counts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -315,19 +350,21 @@ pub struct Outcome {
 /// before it is unlinked (a test's hook; pass a no-op otherwise). Nothing is removed unless every record and file is
 /// matched or read back equal; an `Err` has removed nothing.
 pub fn end_session(files: &SessionFiles, zone: &dyn Zone, erase: &mut dyn FnMut(&Path, u64)) -> Result<Outcome, String> {
+    require_open_matching(&withhold::health().mode)?;
     let members = members(files)?;
     let index = index_store(zone, &files.sid)?;
+    // What each file is before the proof reads it: removal checks it is still that.
+    let mut raw = Vec::new();
+    for m in &members {
+        raw.push((m.path.clone(), file_digest(&m.path)?));
+    }
     let mut proofs = Vec::new();
     for m in &members {
-        proofs.push(if is_lines_file(m) {
-            prove_lines(m, &index)?
-        } else {
-            FileProof { rel: m.rel.clone(), path: m.path.clone(), records: 0, matched: 0, unmatched: Vec::new(), sidecar: Vec::new(), whole: true }
-        });
+        proofs.push(if is_lines_file(m) { prove_lines(m, &index)? } else { whole_proof(m)? });
     }
     import(files, zone, &proofs)?;
     verify(files, zone, &proofs)?;
-    let removed = remove_session(files, erase)?;
+    let removed = remove_proved(files, &raw, erase)?;
     let mut out = Outcome { files: members.len(), removed_files: removed, ..Default::default() };
     for p in &proofs {
         out.records += p.records;
@@ -368,7 +405,7 @@ fn verify(files: &SessionFiles, zone: &dyn Zone, proofs: &[FileProof]) -> Result
     for p in proofs {
         let name = import_name(&files.sid, &p.rel);
         if p.whole {
-            if file_digest(&p.path)? != zone_digest(zone, &name)? {
+            if p.want != Some(zone_digest(zone, &name)?) {
                 return Err("an imported file does not read back equal".to_string());
             }
         } else if !p.unmatched.is_empty() {
@@ -384,34 +421,62 @@ fn verify(files: &SessionFiles, zone: &dyn Zone, proofs: &[FileProof]) -> Result
     Ok(())
 }
 
-/// Overwrite a file with zeros, sync it, let `hook` see it, and unlink it.
-fn erase_file(path: &Path, hook: &mut dyn FnMut(&Path, u64)) -> Result<(), String> {
-    let size = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?.len();
-    {
-        let mut f = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| e.to_string())?;
-        let zeros = vec![0u8; 64 << 10];
-        let mut left = size;
-        while left > 0 {
-            let n = left.min(zeros.len() as u64) as usize;
-            f.write_all(&zeros[..n]).map_err(|e| e.to_string())?;
-            left -= n as u64;
-        }
-        f.sync_all().map_err(|e| e.to_string())?;
+/// Overwrite a file with zeros, sync it, let `hook` see it, and unlink it. The file is opened once, and what it holds
+/// must still be what the proof read (`expect`): a file that grew or changed, or a link put in its place, is refused.
+fn erase_file(path: &Path, expect: Sum, hook: &mut dyn FnMut(&Path, u64)) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom};
+    if !std::fs::symlink_metadata(path).map_err(|e| e.to_string())?.is_file() {
+        return Err("a file of the session changed into something that is not a file".to_string());
     }
+    let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path).map_err(|e| e.to_string())?;
+    let mut h = Sha256::new();
+    let mut size = 0u64;
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        size += n as u64;
+        h.update(&buf[..n]);
+    }
+    if (size, <[u8; 32]>::from(h.finalize())) != expect {
+        return Err("a file of the session changed after it was proved".to_string());
+    }
+    f.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    let zeros = vec![0u8; 64 << 10];
+    let mut left = size;
+    while left > 0 {
+        let n = left.min(zeros.len() as u64) as usize;
+        f.write_all(&zeros[..n]).map_err(|e| e.to_string())?;
+        left -= n as u64;
+    }
+    f.sync_all().map_err(|e| e.to_string())?;
+    drop(f);
     hook(path, size);
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
-/// Remove one session's files by its id: each file overwritten with zeros and then unlinked, then the session's
-/// folders. It names only `<sid>.jsonl` and `<sid>/` under the project folder and follows no link: a link or a special
-/// file in the folder stops it before any file is touched. Returns how many files it removed.
-pub fn remove_session(files: &SessionFiles, erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
-    let members = members(files)?;
-    for m in &members {
-        erase_file(&m.path, erase)?;
+/// Remove the files the proof read, by session id: each overwritten with zeros and then unlinked, then the session's
+/// folders. It names only `<sid>.jsonl` and `<sid>/` under the project folder and follows no link. A file that was
+/// added, is missing, or no longer holds what the proof read stops it **before any file is touched**. Returns how
+/// many files it removed.
+fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
+    let now = members(files)?;
+    let same = now.len() == proved.len() && now.iter().zip(proved).all(|(m, (p, _))| &m.path == p);
+    if !same {
+        return Err("the files of the session changed after they were proved".to_string());
+    }
+    for (path, digest) in proved {
+        if file_digest(path)? != *digest {
+            return Err("a file of the session changed after it was proved".to_string());
+        }
+    }
+    for (path, digest) in proved {
+        erase_file(path, *digest, erase)?;
     }
     remove_dirs(&files.folder);
-    Ok(members.len())
+    Ok(proved.len())
 }
 
 /// Remove the folder and its empty subfolders, deepest first; one that is not empty stays.
