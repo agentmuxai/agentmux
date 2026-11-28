@@ -575,6 +575,20 @@
     // on a 1M window. See docs/specs/SPEC_AGENT_SELF_COMPACTION_2026_10_23.md §3.1.
     // "agent:compactat": 600000,
 
+    // How many days an agent's newest Claude session may go unused, with nothing running it,
+    // before AgentMux ends it: it checks that the history it keeps holds everything in the
+    // session's files, keeps whatever it lacks, and removes the files by session id. The agent
+    // then continues from its history in a new session. A shorter limit removes the files
+    // sooner; the most it accepts is 30. A stop, a restart or a quit does not end a session.
+    // See docs/specs/SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md section 5.4.
+    // "agent:rawsessionidledays": 7,
+
+    // Remove the files of an agent's ended Claude sessions (it moved to another session, or its
+    // newest session went unused for agent:rawsessionidledays) once the history AgentMux keeps
+    // is proved to hold what they hold. Off until the history migration turns it on. See
+    // docs/specs/SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md section 5.4.
+    // "history:sessionfilesweep": false,
+
     // Agent CLIs to run from your own copy on PATH instead of the one AgentMux installs and
     // pins, by provider id (for example goose). Off for every CLI by default: AgentMux runs
     // only its own copy and never touches yours. Set it from a CLI's row in Toolchain (Use the

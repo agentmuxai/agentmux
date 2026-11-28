@@ -103,6 +103,8 @@ pub fn spawn_background_subsystems(
 
     start_session_archiver(mstore, filestore);
 
+    start_provider_session_sweep(filestore, &config_watcher);
+
     BackgroundSubsystems {
         event_bus,
         broker,
@@ -556,6 +558,30 @@ fn warm_agent_clis(mstore: &Arc<Store>) {
             (None, _) => tracing::warn!("cli warm-up: no data paths; skipped"),
         }
     }
+}
+
+/// Ends the provider sessions an agent has left or let go idle: proves the history holds what their files hold, then
+/// removes the files by session id. It reads the switch and the idle limit each time and does nothing while the
+/// switch is off (`history:sessionfilesweep`, off until the history migration turns it on).
+fn start_provider_session_sweep(filestore: &Arc<FileStore>, config: &Arc<wconfig::ConfigState>) {
+    let (filestore, config) = (Arc::clone(filestore), Arc::clone(config));
+    tokio::spawn(run_archive_sweeps(move || {
+        let (filestore, config) = (Arc::clone(&filestore), Arc::clone(&config));
+        async move {
+            let policy = backend::provider_sessions::Policy::from_extra(&config.get_settings().extra);
+            if !policy.enabled {
+                return;
+            }
+            let swept = tokio::task::spawn_blocking(move || {
+                backend::provider_sessions::sweep(&filestore, &backend::provider_sessions::Roots::from_env(), &policy, agentmux_common::time::now_ms())
+            })
+            .await;
+            match swept {
+                Ok(report) => tracing::info!(?report, "provider session sweep complete"),
+                Err(e) => tracing::warn!(error = %e, "provider session sweep failed"),
+            }
+        }
+    }));
 }
 
 /// Starts the sweeps that archive sessions inactive for a week.

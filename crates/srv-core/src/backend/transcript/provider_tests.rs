@@ -80,7 +80,7 @@ impl Env {
     }
 
     fn end(&self) -> Result<Outcome, String> {
-        end_session(&self.files(), &self.zone(), &mut |_, _| {})
+        end_session(&self.files(), &[&self.zone()], &self.zone(), &mut |_, _| {})
     }
 }
 
@@ -182,7 +182,7 @@ fn a_failed_import_removes_nothing() {
     let e = Env::new(&[]);
     e.provider(&[provider_user("not-in-the-store", "u1")]);
     e.write(&format!("{SID}/tool-results/spill.txt"), "S");
-    let r = end_session(&e.files(), &Failing(e.zone()), &mut |_, _| panic!("nothing may be erased"));
+    let r = end_session(&e.files(), &[&e.zone()], &Failing(e.zone()), &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err());
     assert!(e.files().jsonl.exists() && e.files().folder.join("tool-results/spill.txt").exists());
 }
@@ -207,7 +207,7 @@ fn removal_overwrites_each_file_before_it_is_unlinked() {
     e.provider(&[provider_user("A-marker", "u1")]);
     e.write(&format!("{SID}/tool-results/spill.txt"), "S-marker bytes");
     let mut seen: Vec<(String, u64, bool)> = Vec::new();
-    end_session(&e.files(), &e.zone(), &mut |p: &Path, size| {
+    end_session(&e.files(), &[&e.zone()], &e.zone(), &mut |p: &Path, size| {
         let bytes = std::fs::read(p).unwrap();
         seen.push((p.file_name().unwrap().to_string_lossy().into_owned(), size, bytes.iter().all(|b| *b == 0)));
     })

@@ -88,10 +88,19 @@ impl Zone for FsZone<'_> {
     }
 }
 
-/// The store's items for a session, read from the zone's `output` a chunk at a time.
-pub fn index_store(zone: &dyn Zone, sid: &str) -> Result<StoreIndex, String> {
-    let size = zone.size(OUTPUT_FILE)?;
+/// The store's items for a session, read from each zone's `output` in turn (the oldest conversation first, so
+/// the order the proof matches in is the order the conversation was written in).
+pub fn index_store(zones: &[&dyn Zone], sid: &str) -> Result<StoreIndex, String> {
     let mut index = StoreIndex::new();
+    for zone in zones {
+        index_zone(*zone, sid, &mut index)?;
+    }
+    Ok(index)
+}
+
+/// Add one zone's `output`, read a chunk at a time.
+fn index_zone(zone: &dyn Zone, sid: &str, index: &mut StoreIndex) -> Result<(), String> {
+    let size = zone.size(OUTPUT_FILE)?;
     let mut carry: Vec<u8> = Vec::new();
     let mut at = 0;
     while at < size {
@@ -111,7 +120,7 @@ pub fn index_store(zone: &dyn Zone, sid: &str) -> Result<StoreIndex, String> {
     if !carry.is_empty() {
         index.add_line(sid, &String::from_utf8_lossy(&carry));
     }
-    Ok(index)
+    Ok(())
 }
 
 /// A session id that names a file safely: letters, digits, `-` and `_`, and no longer than a path part needs.
@@ -349,10 +358,10 @@ pub struct Outcome {
 /// Prove, import, verify and remove one session's files. `erase` is called for each file after it is overwritten and
 /// before it is unlinked (a test's hook; pass a no-op otherwise). Nothing is removed unless every record and file is
 /// matched or read back equal; an `Err` has removed nothing.
-pub fn end_session(files: &SessionFiles, zone: &dyn Zone, erase: &mut dyn FnMut(&Path, u64)) -> Result<Outcome, String> {
+pub fn end_session(files: &SessionFiles, read: &[&dyn Zone], zone: &dyn Zone, erase: &mut dyn FnMut(&Path, u64)) -> Result<Outcome, String> {
     require_open_matching(&withhold::health().mode)?;
     let members = members(files)?;
-    let index = index_store(zone, &files.sid)?;
+    let index = index_store(read, &files.sid)?;
     // What each file is before the proof reads it: removal checks it is still that.
     let mut raw = Vec::new();
     for m in &members {

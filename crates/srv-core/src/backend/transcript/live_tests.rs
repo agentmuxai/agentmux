@@ -217,6 +217,21 @@ fn fragments_are_announced_with_no_position_and_complete_lines_with_one() {
 }
 
 #[test]
+fn archiving_after_a_kill_keeps_the_leftover_with_its_own_conversation() {
+    let e = env("blk-9");
+    for l in [user("go"), start("m1"), block(0, json!({ "type": "text", "text": "" })), text_delta(0, "cut before the archive")] {
+        e.write(None, &[l]);
+    }
+    forget("blk-9"); // the process was killed; nothing recovered the live file yet
+    let archived = crate::backend::agent_session::archive::archive_session_in(&e.fs, Some(&e.gfs), "def-live").unwrap().unwrap();
+    let held = e.text(&e.gfs, &archived.0, "output").unwrap();
+    assert!(held.contains("cut before the archive") && held.contains("interrupted"), "{held}");
+    assert!(e.text(&e.gfs, ZONE, LIVE_FILE).is_none(), "no leftover for the next conversation");
+    e.write(None, &[user("new conversation")]);
+    assert_eq!(kinds(&e.output()), vec!["user"], "the new conversation starts clean");
+}
+
+#[test]
 fn a_write_without_an_agent_stream_is_not_split() {
     let fs = Arc::new(FileStore::open_in_memory().unwrap());
     let frag = start("m1");

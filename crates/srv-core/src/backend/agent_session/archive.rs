@@ -218,6 +218,8 @@ fn archive_global_current(gfs: &FileStore, definition_id: &str, before_move: imp
     if !has(SNAPSHOT_FILE)? && !has(OUTPUT_FILE)? {
         return Ok(GlobalArchive::Nothing);
     }
+    // What a kill left in the live file belongs to this conversation, not the next one.
+    crate::backend::transcript::live::settle(gfs, &current_zone);
     before_move();
 
     let files = [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, crate::backend::continuity_state::STATE_FILE];
