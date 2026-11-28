@@ -138,8 +138,9 @@ pub(crate) fn append_fragments(targets: &[(Arc<FileStore>, String)], bytes: &[u8
 /// Empty the live file of every target.
 pub(crate) fn clear(targets: &[(Arc<FileStore>, String)]) {
     for (fs, zone) in targets {
-        if let Err(e) = fs.delete_file(zone, LIVE_FILE) {
-            tracing::warn!(zone = %zone, error = %e, "transcript live file: clearing failed");
+        match fs.delete_file(zone, LIVE_FILE) {
+            Ok(()) | Err(StoreError::NotFound) => {}
+            Err(e) => tracing::warn!(zone = %zone, error = %e, "transcript live file: clearing failed"),
         }
     }
 }
@@ -170,9 +171,27 @@ fn leftovers_of(fs: &FileStore, zone: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Settle a zone's live file before its conversation leaves the zone (an archive moves `output` away): what a kill
+/// left becomes lines of `output`, and the file is emptied. A leftover left in place would be recovered into the next
+/// conversation's `output` as a cut-off reply it never had. A failure to append leaves the live file as it is.
+pub(crate) fn settle(fs: &FileStore, zone: &str) {
+    let Some(left) = leftovers_of(fs, zone) else { return };
+    if !left.is_empty() {
+        if let Err(e) = fs.append_data(zone, OUTPUT_FILE, &left) {
+            tracing::warn!(zone = %zone, error = %e, "transcript live file: settling before archive failed");
+            return;
+        }
+    }
+    if let Err(e) = fs.delete_file(zone, LIVE_FILE) {
+        tracing::warn!(zone = %zone, error = %e, "transcript live file: clearing failed");
+    }
+}
+
 /// The first call for a block in this process: what a kill left in its live file, as lines for
 /// `output` (possibly none), after which the live files are emptied. `None` on every later call,
-/// and when no target has a live file.
+/// and when there is nothing to recover. The first target (the shared zone, when there is one) is the
+/// one that is read: a copy left in another target after the first was emptied (an archive settles the
+/// shared zone) is stale, and is only emptied.
 pub(crate) fn recover_once(block_id: &str, targets: &[(Arc<FileStore>, String)]) -> Option<Vec<u8>> {
     {
         let mut states = STATES.lock().unwrap_or_else(|e| e.into_inner());
@@ -181,9 +200,10 @@ pub(crate) fn recover_once(block_id: &str, targets: &[(Arc<FileStore>, String)])
             return None;
         }
     }
-    let found = targets.iter().find_map(|(fs, zone)| leftovers_of(fs, zone))?;
+    let (fs, zone) = targets.first()?;
+    let found = leftovers_of(fs, zone);
     clear(targets);
-    Some(found)
+    found
 }
 
 #[cfg(test)]

@@ -80,7 +80,30 @@ impl Env {
     }
 
     fn end(&self) -> Result<Outcome, String> {
-        end_session(&self.files(), &self.zone(), &mut |_, _| {})
+        end_session(&self.files(), &[&self.zone()], &self.zone(), &mut go, &mut |_, _| {})
+    }
+}
+
+/// A `before_remove` that holds nothing and allows the removal.
+fn go() -> Result<Box<dyn Hold>, String> {
+    Ok(Box::new(()))
+}
+
+/// A hold that is counted by the number of references to it.
+impl Hold for std::rc::Rc<()> {
+    fn still_held(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A hold that is lost after `n` asks.
+struct LostAfter(std::cell::Cell<u32>);
+
+impl Hold for LostAfter {
+    fn still_held(&self) -> Result<(), String> {
+        let left = self.0.get();
+        self.0.set(left.saturating_sub(1));
+        if left == 0 { Err("lost".to_string()) } else { Ok(()) }
     }
 }
 
@@ -178,11 +201,51 @@ impl Zone for Failing<'_> {
 }
 
 #[test]
+fn a_refusal_before_the_removal_removes_nothing_and_a_hold_lasts_until_the_files_are_gone() {
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    let r = end_session(&e.files(), &[&e.zone()], &e.zone(), &mut || Err("the agent is running".to_string()), &mut |_, _| panic!("nothing may be erased"));
+    assert_eq!(r, Err("the agent is running".to_string()));
+    assert!(e.files().jsonl.exists());
+    let held = std::rc::Rc::new(());
+    let seen = std::rc::Rc::clone(&held);
+    let mut count = 0;
+    end_session(&e.files(), &[&e.zone()], &e.zone(), &mut || Ok(Box::new(std::rc::Rc::clone(&seen))), &mut |_, _| count = std::rc::Rc::strong_count(&held)).unwrap();
+    assert_eq!(count, 3, "the hold is still kept while a file is erased");
+    assert_eq!(std::rc::Rc::strong_count(&held), 2, "and let go after");
+}
+
+#[test]
+fn a_hold_that_is_lost_stops_the_removal_before_the_next_file() {
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    e.write(&format!("{SID}/tool-results/a.txt"), "a");
+    e.write(&format!("{SID}/tool-results/b.txt"), "b");
+    // Asked once at the start of the removal and once before each file: lost before the second file.
+    let mut erased = 0;
+    let r = end_session(&e.files(), &[&e.zone()], &e.zone(), &mut || Ok(Box::new(LostAfter(std::cell::Cell::new(2)))), &mut |_, _| erased += 1);
+    assert!(r.is_err());
+    assert_eq!(erased, 1, "one file was erased, the next was not touched");
+    assert!(e.files().folder.join("tool-results/b.txt").exists());
+}
+
+#[test]
+fn the_newest_write_anywhere_in_the_session_is_its_time() {
+    let e = Env::new(&[]);
+    e.provider(&[provider_user("x", "u1")]);
+    let first = newest_modified_ms(&e.files()).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    e.write(&format!("{SID}/tool-results/late.txt"), "written later");
+    assert!(newest_modified_ms(&e.files()).unwrap() > first, "a child file counts");
+    assert_eq!(newest_modified_ms(&SessionFiles::at(e.dir.path(), "99999999-aaaa-bbbb-cccc-000000000000").unwrap()), None);
+}
+
+#[test]
 fn a_failed_import_removes_nothing() {
     let e = Env::new(&[]);
     e.provider(&[provider_user("not-in-the-store", "u1")]);
     e.write(&format!("{SID}/tool-results/spill.txt"), "S");
-    let r = end_session(&e.files(), &Failing(e.zone()), &mut |_, _| panic!("nothing may be erased"));
+    let r = end_session(&e.files(), &[&e.zone()], &Failing(e.zone()), &mut go, &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err());
     assert!(e.files().jsonl.exists() && e.files().folder.join("tool-results/spill.txt").exists());
 }
@@ -207,7 +270,7 @@ fn removal_overwrites_each_file_before_it_is_unlinked() {
     e.provider(&[provider_user("A-marker", "u1")]);
     e.write(&format!("{SID}/tool-results/spill.txt"), "S-marker bytes");
     let mut seen: Vec<(String, u64, bool)> = Vec::new();
-    end_session(&e.files(), &e.zone(), &mut |p: &Path, size| {
+    end_session(&e.files(), &[&e.zone()], &e.zone(), &mut go, &mut |p: &Path, size| {
         let bytes = std::fs::read(p).unwrap();
         seen.push((p.file_name().unwrap().to_string_lossy().into_owned(), size, bytes.iter().all(|b| *b == 0)));
     })
@@ -290,11 +353,11 @@ fn a_file_that_changed_after_the_proof_is_not_removed() {
     let mut f = std::fs::OpenOptions::new().append(true).open(&files.jsonl).unwrap();
     f.write_all(b"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"late\"}}\n").unwrap();
     drop(f);
-    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    let r = remove_proved(&files, &proved, &(), &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err() && files.jsonl.exists());
     // A file that was added.
     e.write(&format!("{SID}/new.txt"), "x");
-    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    let r = remove_proved(&files, &proved, &(), &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err() && files.folder.join("new.txt").exists());
 }
 

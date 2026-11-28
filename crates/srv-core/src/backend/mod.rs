@@ -102,6 +102,7 @@ pub mod agent_runtime_latest;
 pub mod model_label;
 pub mod agent_context_usage;
 pub mod agent_api_retry;
+pub mod provider_sessions;
 pub mod providers;
 pub mod providers_custom;
 pub mod harness_manifest;

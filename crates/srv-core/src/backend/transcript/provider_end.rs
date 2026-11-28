@@ -88,10 +88,19 @@ impl Zone for FsZone<'_> {
     }
 }
 
-/// The store's items for a session, read from the zone's `output` a chunk at a time.
-pub fn index_store(zone: &dyn Zone, sid: &str) -> Result<StoreIndex, String> {
-    let size = zone.size(OUTPUT_FILE)?;
+/// The store's items for a session, read from each zone's `output` in turn (the oldest conversation first, so
+/// the order the proof matches in is the order the conversation was written in).
+pub fn index_store(zones: &[&dyn Zone], sid: &str) -> Result<StoreIndex, String> {
     let mut index = StoreIndex::new();
+    for zone in zones {
+        index_zone(*zone, sid, &mut index)?;
+    }
+    Ok(index)
+}
+
+/// Add one zone's `output`, read a chunk at a time.
+fn index_zone(zone: &dyn Zone, sid: &str, index: &mut StoreIndex) -> Result<(), String> {
+    let size = zone.size(OUTPUT_FILE)?;
     let mut carry: Vec<u8> = Vec::new();
     let mut at = 0;
     while at < size {
@@ -111,7 +120,17 @@ pub fn index_store(zone: &dyn Zone, sid: &str) -> Result<StoreIndex, String> {
     if !carry.is_empty() {
         index.add_line(sid, &String::from_utf8_lossy(&carry));
     }
-    Ok(index)
+    Ok(())
+}
+
+/// When anything the session holds was last written, as ms since the epoch: the newest of its session file and every
+/// file under its folder. `None` when it has no file.
+pub fn newest_modified_ms(files: &SessionFiles) -> Option<i64> {
+    let stamp = |p: &Path| -> Option<i64> {
+        let t = std::fs::metadata(p).ok()?.modified().ok()?;
+        Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64)
+    };
+    members(files).ok()?.iter().filter_map(|m| stamp(&m.path)).max()
 }
 
 /// A session id that names a file safely: letters, digits, `-` and `_`, and no longer than a path part needs.
@@ -335,6 +354,18 @@ fn require_open_matching(mode: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What the caller holds across the removal (an agent's lease): the removal asks before each file whether it is
+/// still held, and stops when it is not.
+pub trait Hold {
+    fn still_held(&self) -> Result<(), String>;
+}
+
+impl Hold for () {
+    fn still_held(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// What the end of a session did, in counts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -346,13 +377,21 @@ pub struct Outcome {
     pub removed_files: usize,
 }
 
-/// Prove, import, verify and remove one session's files. `erase` is called for each file after it is overwritten and
+/// Prove, import, verify and remove one session's files. `before_remove` runs after the verify and before any file is
+/// touched: an `Err` stops with nothing removed, and what it returns is kept until the removal is done and asked before
+/// each file whether it is still held. `erase` is called for each file after it is overwritten and
 /// before it is unlinked (a test's hook; pass a no-op otherwise). Nothing is removed unless every record and file is
 /// matched or read back equal; an `Err` has removed nothing.
-pub fn end_session(files: &SessionFiles, zone: &dyn Zone, erase: &mut dyn FnMut(&Path, u64)) -> Result<Outcome, String> {
+pub fn end_session(
+    files: &SessionFiles,
+    read: &[&dyn Zone],
+    zone: &dyn Zone,
+    before_remove: &mut dyn FnMut() -> Result<Box<dyn Hold>, String>,
+    erase: &mut dyn FnMut(&Path, u64),
+) -> Result<Outcome, String> {
     require_open_matching(&withhold::health().mode)?;
     let members = members(files)?;
-    let index = index_store(zone, &files.sid)?;
+    let index = index_store(read, &files.sid)?;
     // What each file is before the proof reads it: removal checks it is still that.
     let mut raw = Vec::new();
     for m in &members {
@@ -364,7 +403,10 @@ pub fn end_session(files: &SessionFiles, zone: &dyn Zone, erase: &mut dyn FnMut(
     }
     import(files, zone, &proofs)?;
     verify(files, zone, &proofs)?;
-    let removed = remove_proved(files, &raw, erase)?;
+    // The caller's last word, held until the files are gone: it may refuse (nothing is removed) or return what it
+    // holds across the removal.
+    let held = before_remove()?;
+    let removed = remove_proved(files, &raw, &*held, erase)?;
     let mut out = Outcome { files: members.len(), removed_files: removed, ..Default::default() };
     for p in &proofs {
         out.records += p.records;
@@ -461,7 +503,8 @@ fn erase_file(path: &Path, expect: Sum, hook: &mut dyn FnMut(&Path, u64)) -> Res
 /// folders. It names only `<sid>.jsonl` and `<sid>/` under the project folder and follows no link. A file that was
 /// added, is missing, or no longer holds what the proof read stops it **before any file is touched**. Returns how
 /// many files it removed.
-fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
+fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], held: &dyn Hold, erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
+    held.still_held()?;
     let now = members(files)?;
     let same = now.len() == proved.len() && now.iter().zip(proved).all(|(m, (p, _))| &m.path == p);
     if !same {
@@ -473,6 +516,7 @@ fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], erase: &mut dy
         }
     }
     for (path, digest) in proved {
+        held.still_held()?;
         erase_file(path, *digest, erase)?;
     }
     remove_dirs(&files.folder);
