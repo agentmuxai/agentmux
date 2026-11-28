@@ -354,6 +354,18 @@ fn require_open_matching(mode: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What the caller holds across the removal (an agent's lease): the removal asks before each file whether it is
+/// still held, and stops when it is not.
+pub trait Hold {
+    fn still_held(&self) -> Result<(), String>;
+}
+
+impl Hold for () {
+    fn still_held(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 /// What the end of a session did, in counts.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
@@ -366,14 +378,15 @@ pub struct Outcome {
 }
 
 /// Prove, import, verify and remove one session's files. `before_remove` runs after the verify and before any file is
-/// touched: an `Err` stops with nothing removed, and what it returns is kept until the removal is done. `erase` is called for each file after it is overwritten and
+/// touched: an `Err` stops with nothing removed, and what it returns is kept until the removal is done and asked before
+/// each file whether it is still held. `erase` is called for each file after it is overwritten and
 /// before it is unlinked (a test's hook; pass a no-op otherwise). Nothing is removed unless every record and file is
 /// matched or read back equal; an `Err` has removed nothing.
 pub fn end_session(
     files: &SessionFiles,
     read: &[&dyn Zone],
     zone: &dyn Zone,
-    before_remove: &mut dyn FnMut() -> Result<Box<dyn std::any::Any>, String>,
+    before_remove: &mut dyn FnMut() -> Result<Box<dyn Hold>, String>,
     erase: &mut dyn FnMut(&Path, u64),
 ) -> Result<Outcome, String> {
     require_open_matching(&withhold::health().mode)?;
@@ -392,8 +405,8 @@ pub fn end_session(
     verify(files, zone, &proofs)?;
     // The caller's last word, held until the files are gone: it may refuse (nothing is removed) or return what it
     // holds across the removal.
-    let _held = before_remove()?;
-    let removed = remove_proved(files, &raw, erase)?;
+    let held = before_remove()?;
+    let removed = remove_proved(files, &raw, &*held, erase)?;
     let mut out = Outcome { files: members.len(), removed_files: removed, ..Default::default() };
     for p in &proofs {
         out.records += p.records;
@@ -490,7 +503,8 @@ fn erase_file(path: &Path, expect: Sum, hook: &mut dyn FnMut(&Path, u64)) -> Res
 /// folders. It names only `<sid>.jsonl` and `<sid>/` under the project folder and follows no link. A file that was
 /// added, is missing, or no longer holds what the proof read stops it **before any file is touched**. Returns how
 /// many files it removed.
-fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
+fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], held: &dyn Hold, erase: &mut dyn FnMut(&Path, u64)) -> Result<usize, String> {
+    held.still_held()?;
     let now = members(files)?;
     let same = now.len() == proved.len() && now.iter().zip(proved).all(|(m, (p, _))| &m.path == p);
     if !same {
@@ -502,6 +516,7 @@ fn remove_proved(files: &SessionFiles, proved: &[(PathBuf, Sum)], erase: &mut dy
         }
     }
     for (path, digest) in proved {
+        held.still_held()?;
         erase_file(path, *digest, erase)?;
     }
     remove_dirs(&files.folder);

@@ -85,8 +85,26 @@ impl Env {
 }
 
 /// A `before_remove` that holds nothing and allows the removal.
-fn go() -> Result<Box<dyn std::any::Any>, String> {
+fn go() -> Result<Box<dyn Hold>, String> {
     Ok(Box::new(()))
+}
+
+/// A hold that is counted by the number of references to it.
+impl Hold for std::rc::Rc<()> {
+    fn still_held(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// A hold that is lost after `n` asks.
+struct LostAfter(std::cell::Cell<u32>);
+
+impl Hold for LostAfter {
+    fn still_held(&self) -> Result<(), String> {
+        let left = self.0.get();
+        self.0.set(left.saturating_sub(1));
+        if left == 0 { Err("lost".to_string()) } else { Ok(()) }
+    }
 }
 
 fn tool_use() -> Value {
@@ -195,6 +213,20 @@ fn a_refusal_before_the_removal_removes_nothing_and_a_hold_lasts_until_the_files
     end_session(&e.files(), &[&e.zone()], &e.zone(), &mut || Ok(Box::new(std::rc::Rc::clone(&seen))), &mut |_, _| count = std::rc::Rc::strong_count(&held)).unwrap();
     assert_eq!(count, 3, "the hold is still kept while a file is erased");
     assert_eq!(std::rc::Rc::strong_count(&held), 2, "and let go after");
+}
+
+#[test]
+fn a_hold_that_is_lost_stops_the_removal_before_the_next_file() {
+    let e = Env::new(&[stored_user("A-marker")]);
+    e.provider(&[provider_user("A-marker", "u1")]);
+    e.write(&format!("{SID}/tool-results/a.txt"), "a");
+    e.write(&format!("{SID}/tool-results/b.txt"), "b");
+    // Asked once at the start of the removal and once before each file: lost before the second file.
+    let mut erased = 0;
+    let r = end_session(&e.files(), &[&e.zone()], &e.zone(), &mut || Ok(Box::new(LostAfter(std::cell::Cell::new(2)))), &mut |_, _| erased += 1);
+    assert!(r.is_err());
+    assert_eq!(erased, 1, "one file was erased, the next was not touched");
+    assert!(e.files().folder.join("tool-results/b.txt").exists());
 }
 
 #[test]
@@ -321,11 +353,11 @@ fn a_file_that_changed_after_the_proof_is_not_removed() {
     let mut f = std::fs::OpenOptions::new().append(true).open(&files.jsonl).unwrap();
     f.write_all(b"{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"late\"}}\n").unwrap();
     drop(f);
-    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    let r = remove_proved(&files, &proved, &(), &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err() && files.jsonl.exists());
     // A file that was added.
     e.write(&format!("{SID}/new.txt"), "x");
-    let r = remove_proved(&files, &proved, &mut |_, _| panic!("nothing may be erased"));
+    let r = remove_proved(&files, &proved, &(), &mut |_, _| panic!("nothing may be erased"));
     assert!(r.is_err() && files.folder.join("new.txt").exists());
 }
 

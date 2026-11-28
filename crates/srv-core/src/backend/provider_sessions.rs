@@ -25,7 +25,7 @@ use std::sync::Arc;
 use crate::backend::continuity_segments::{self as segs, Segment};
 use crate::registry::LeaseStore;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::transcript::provider_end::{end_session, newest_modified_ms, FsZone, SessionFiles, Zone};
+use crate::backend::transcript::provider_end::{end_session, newest_modified_ms, FsZone, Hold, SessionFiles, Zone};
 
 /// The sweep's switch: off until the migration turns it on.
 pub const KEY_SWEEP: &str = "history:sessionfilesweep";
@@ -83,16 +83,61 @@ impl Roots {
 pub struct Admission {
     store: Arc<LeaseStore>,
     boot: Arc<str>,
+    /// How often a held lease is renewed (the lease lapses after 15 seconds).
+    renew_every: std::time::Duration,
 }
 
-/// A lease held for the removal; let go on drop.
+/// A lease held for the removal. A thread renews it until the hold is dropped, so a long removal cannot outlast it;
+/// [`Hold::still_held`] renews it too and fails once it belongs to someone else. Let go on drop.
 struct Held {
     store: Arc<LeaseStore>,
     lease: crate::registry::Lease,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    lost: Arc<std::sync::atomic::AtomicBool>,
+    renewer: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Held {
+    fn new(store: Arc<LeaseStore>, lease: crate::registry::Lease, every: std::time::Duration) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let (stop, lost) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let renewer = {
+            let (store, lease, stop, lost) = (Arc::clone(&store), lease.clone(), Arc::clone(&stop), Arc::clone(&lost));
+            std::thread::spawn(move || {
+                let step = std::time::Duration::from_millis(20).min(every);
+                let mut waited = std::time::Duration::ZERO;
+                while !stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(step);
+                    waited += step;
+                    if waited >= every {
+                        waited = std::time::Duration::ZERO;
+                        if store.renew(&lease).is_err() {
+                            lost.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+            })
+        };
+        Self { store, lease, stop, lost, renewer: Some(renewer) }
+    }
+}
+
+impl Hold for Held {
+    fn still_held(&self) -> Result<(), String> {
+        if self.lost.load(std::sync::atomic::Ordering::Relaxed) || self.store.renew(&self.lease).is_err() {
+            self.lost.store(true, std::sync::atomic::Ordering::Relaxed);
+            return Err("the agent's lease was lost during the removal".to_string());
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Held {
     fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.renewer.take() {
+            let _ = t.join();
+        }
         let _ = self.store.release(&self.lease);
     }
 }
@@ -100,18 +145,22 @@ impl Drop for Held {
 impl Admission {
     /// `None` when there is no lease store (no shared registry): nothing can then be proved safe, so nothing is swept.
     pub fn new(registry: Option<Arc<crate::registry::Registry>>) -> Option<Self> {
-        Some(Self { store: crate::backend::agent_admission::lease_store_for(registry)?, boot: Arc::from(format!("provider-sweep-{}", uuid::Uuid::new_v4())) })
+        Some(Self {
+            store: crate::backend::agent_admission::lease_store_for(registry)?,
+            boot: Arc::from(format!("provider-sweep-{}", uuid::Uuid::new_v4())),
+            renew_every: std::time::Duration::from_secs(2),
+        })
     }
 
     #[cfg(test)]
-    fn with_store(store: Arc<LeaseStore>) -> Self {
-        Self { store, boot: Arc::from("provider-sweep-test") }
+    fn with_store(store: Arc<LeaseStore>, renew_every: std::time::Duration) -> Self {
+        Self { store, boot: Arc::from("provider-sweep-test"), renew_every }
     }
 
     fn hold(&self, uid: &str) -> Option<Held> {
         let info = crate::backend::agent_admission::claimant_info();
         let lease = self.store.claim_as(uid, &self.boot, "provider-sweep", None, &info).ok()?;
-        Some(Held { store: Arc::clone(&self.store), lease })
+        Some(Held::new(Arc::clone(&self.store), lease, self.renew_every))
     }
 }
 
@@ -215,7 +264,7 @@ fn sweep_agent(fs: &FileStore, uid: &str, roots: &Roots, policy: &Policy, now_ms
         let read: Vec<&dyn Zone> = read.iter().map(|z| z as &dyn Zone).collect();
         // After the proof and the import, and before any file is touched: hold the agent's lease, so it cannot
         // resume this session now, and look again under it that the session is still ended.
-        let mut admit_removal = || -> Result<Box<dyn std::any::Any>, String> {
+        let mut admit_removal = || -> Result<Box<dyn Hold>, String> {
             let held = admit.hold(uid).ok_or_else(|| "the agent is running or starting".to_string())?;
             if !ended_sessions(uid, &segs::segments(fs, uid), roots, policy, now_ms).iter().any(|x| x.sid == e.sid) {
                 return Err("the session is in use again".to_string());

@@ -34,7 +34,7 @@ impl Env {
         let cwd = dir.path().join("work").to_string_lossy().into_owned();
         let roots = Roots { shared: Some(shared), agentmux_home: Some(dir.path().to_path_buf()) };
         let leases = Arc::new(LeaseStore::open(&dir.path().join("registry")).unwrap());
-        let admit = Admission::with_store(Arc::clone(&leases));
+        let admit = Admission::with_store(Arc::clone(&leases), std::time::Duration::from_secs(2));
         Self { dir, fs: FileStore::open_in_memory().unwrap(), roots, admit, leases, config: config.to_string_lossy().into_owned(), cwd }
     }
 
@@ -242,6 +242,24 @@ fn an_agent_that_holds_its_lease_is_not_swept_and_is_once_it_lets_go() {
     assert!(!e.file(SID1).exists());
     // The sweep let go of the lease: the agent can start.
     assert!(e.leases.claim(UID, &Arc::from("a-live-process"), "pane-1", None).is_ok());
+}
+
+#[test]
+fn a_held_lease_is_renewed_until_the_hold_is_dropped_and_loss_is_noticed() {
+    let dir = tempfile::tempdir().unwrap();
+    // A lease that lapses after 300 ms, renewed every 50 ms by the hold.
+    let store = Arc::new(LeaseStore::open_with_ttl(dir.path(), 300).unwrap());
+    let admit = Admission::with_store(Arc::clone(&store), std::time::Duration::from_millis(50));
+    let held = admit.hold(UID).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(900));
+    assert!(store.claim(UID, &Arc::from("a-live-process"), "pane-1", None).is_err(), "still held three lifetimes later: it was renewed");
+    assert!(held.still_held().is_ok());
+    // Taken over (as it would be were the renewal to fail): the hold says so.
+    store.release(&held.lease).unwrap();
+    let other = store.claim(UID, &Arc::from("a-live-process"), "pane-1", None).unwrap();
+    assert!(held.still_held().is_err(), "ownership was lost");
+    drop(held);
+    assert!(store.renew(&other).is_ok(), "dropping the hold does not release a lease that is another's now");
 }
 
 #[test]
