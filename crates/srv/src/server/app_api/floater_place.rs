@@ -127,6 +127,34 @@ pub(crate) fn for_browser(
     Ok(())
 }
 
+/// `agent:floatbrowsers`: the person has chosen that every browser an agent opens floats, unless the open says where
+/// it goes (docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md §4, choice 1). Off by default.
+pub(crate) const SETTING_FLOAT_BROWSERS: &str = "agent:floatbrowsers";
+
+/// Whether a browser open floats by the setting: it is on, the open said nothing about `floating` (an explicit
+/// `floating: false` keeps the browser docked) and named no split, and the agent has room under its cap of four.
+/// A default never refuses an open: at the cap the browser opens docked, as it would with the setting off.
+pub(crate) fn float_default(on: bool, asked: Option<bool>, split: bool, open: usize) -> bool {
+    on && asked.is_none() && !split && open < MAX_FLOATERS
+}
+
+/// Make a browser open float when `agent:floatbrowsers` says so ([`float_default`], and under the shared rate limit
+/// of an agent's floating opens), with a floating browser's defaults.
+pub(crate) async fn float_by_setting(state: &crate::server::AppState, cmd: &mut CommandPaneOpenData, asked: Option<bool>) {
+    let Some(agent) = cmd.opener.clone() else { return };
+    let on = state.config_watcher.get_settings().extra.get(SETTING_FLOAT_BROWSERS).and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let split = cmd.split_direction.as_deref().is_some_and(|d| !d.is_empty());
+    // The cheap checks first: the rate limit counts only an open that goes on to float.
+    if !on || asked.is_some() || split {
+        return;
+    }
+    let open = live_floaters(state, &agent).await.len();
+    if float_default(on, asked, split, open) && crate::server::deeplink_guard::check_place_rate(&agent).is_ok() {
+        cmd.floating = Some(true);
+        cmd.floater_max_share = browser_defaults(cmd);
+    }
+}
+
 /// The `data` of a browser open's answer: the pane, what it browses as, and for a floating open where its window went.
 pub(crate) fn open_answer(result: &crate::backend::rpc_types::PaneOpenResult, browsing_as: &str) -> serde_json::Value {
     let mut data = serde_json::json!({ "pane": result.block_id, "browsing_as": browsing_as });

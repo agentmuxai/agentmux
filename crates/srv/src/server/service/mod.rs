@@ -27,6 +27,7 @@ mod layout_intents_tests;
 #[cfg(test)]
 mod pane_tab_command_tests;
 mod misc;
+pub(crate) mod pane_share;
 mod object;
 #[cfg(test)]
 mod object_tests;

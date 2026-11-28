@@ -246,3 +246,30 @@ async fn a_layout_with_no_floaters_asks_nobody() {
     assert_eq!(layout, before);
     assert!(seen.lock().unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn the_layout_says_whether_the_person_tacked_a_floater_and_gives_it_no_share() {
+    let state = test_state();
+    let (tacked, loose) = (floater_in_a_window(&state).await, floater_in_a_window(&state).await);
+    for b in [&tacked, &loose] {
+        pane_openers::record(b, &an_agent(), true);
+    }
+    // The host writes the tack through to the block's meta (`set_floating_always_on_top`).
+    let mut block = state.mstore.get::<crate::backend::obj::Block>(&tacked).unwrap().unwrap();
+    block.meta.insert("pane:floating_ontop".into(), json!(true));
+    state.mstore.update(&mut block).unwrap();
+    watch(&state, Some(Ok(rect())));
+    let mut layout = json!({ "windows": [{ "tabs": [{ "panes": [
+        { "block_id": tacked, "share": 1.0 },
+        { "block_id": loose, "share": 1.0 },
+    ] }] }] });
+
+    report_floaters(&state, &mut layout).await;
+
+    let panes = &layout["windows"][0]["tabs"][0]["panes"];
+    assert_eq!((panes[0]["always_on_top"].clone(), panes[1]["always_on_top"].clone()), (json!(true), json!(false)));
+    assert!(panes[0].get("share").is_none() && panes[1].get("share").is_none(), "a window alone in its tab has a rect, not a share");
+    for b in [&tacked, &loose] {
+        pane_openers::forget(b);
+    }
+}

@@ -672,6 +672,14 @@
     // docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md.
     // "agent:maystartagents": false,
 
+    // Open every browser an agent opens in a floating window of its own, when the agent does
+    // not say where it goes. Off by default: an agent's first browser opens in a pane below its
+    // own, and later ones are tabs of it. A browser an agent hands to you (a sign-in, a
+    // CAPTCHA) floats whatever this says. An agent that asks for floating: false, a split or a
+    // place keeps its choice; at most 4 floating panes per agent, then the next one opens
+    // docked. See docs/specs/SPEC_AGENT_PANE_PLACEMENT_FLOATING_2026_11_22.md.
+    // "agent:floatbrowsers": false,
+
     // Write a defined agent's transcript to the agent's own zone in the global transcript store
     // only, not also to the block's own store. Halves what AgentMux writes to disk while agents
     // run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that

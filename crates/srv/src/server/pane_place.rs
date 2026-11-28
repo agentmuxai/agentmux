@@ -183,8 +183,13 @@ pub(super) async fn handle_pane_place(
     }
 }
 
+/// Whether the person tacked the floating pane `block_id` (its header's always-on-top pin): the block's meta says so.
+fn is_tacked(mstore: &crate::backend::storage::store::Store, block_id: &str) -> bool {
+    mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten().is_some_and(|b| b.meta.get("pane:floating_ontop").and_then(|v| v.as_bool()) == Some(true))
+}
+
 /// `Pane layout`'s report of the floating panes agents opened: each gets `floating: true` and, from its window, `rect`
-/// (`x`, `y`, `width`, `height` in CSS pixels from the work area's top-left, and `display_scale`). A window that
+/// (`x`, `y`, `width`, `height` in CSS pixels from the work area's top-left, and `display_scale`) and `always_on_top` (the person's tack). A window that
 /// does not answer gets `rect: null` and the reason. Panes nobody opened as a floater are left as they are.
 pub(super) async fn report_floaters(state: &AppState, layout: &mut serde_json::Value) {
     let Some(windows) = layout.get_mut("windows").and_then(|w| w.as_array_mut()) else { return };
@@ -202,6 +207,7 @@ pub(super) async fn report_floaters(state: &AppState, layout: &mut serde_json::V
     if floaters.is_empty() {
         return;
     }
+    let tacked: Vec<String> = floaters.iter().filter(|b| is_tacked(&state.mstore, b)).cloned().collect();
     let measured = futures_util::future::join_all(floaters.iter().map(|block| async move {
         let Some(win) = window_of(state, block).await else { return (block.clone(), None) };
         (block.clone(), Some(ask(state, win, block, None, None, MEASURE_WAIT).await))
@@ -215,6 +221,12 @@ pub(super) async fn report_floaters(state: &AppState, layout: &mut serde_json::V
         let Some(block) = pane.get("block_id").and_then(|b| b.as_str()).map(str::to_string) else { continue };
         let Some((_, answer)) = measured.iter().find(|(b, _)| *b == block) else { continue };
         pane["floating"] = json!(true);
+        // A floating window is alone in its own tab: its `rect` says how big it is, a share of that tab would not.
+        if let Some(o) = pane.as_object_mut() {
+            o.remove("share");
+        }
+        // The tack is the block's own meta, which the host writes through (`set_floating_always_on_top`).
+        pane["always_on_top"] = json!(tacked.contains(&block));
         match answer {
             Some(Ok(p)) => {
                 pane["rect"] = json!({ "x": p.x, "y": p.y, "width": p.width, "height": p.height, "display_scale": p.display_scale });

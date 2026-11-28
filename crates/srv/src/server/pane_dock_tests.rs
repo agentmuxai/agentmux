@@ -277,3 +277,52 @@ async fn a_stop_docks_the_floaters_its_agent_opened_and_no_one_elses() {
         pane_openers::forget(b);
     }
 }
+
+#[tokio::test]
+async fn a_handoff_floats_a_docked_browser_the_caller_opened_and_nothing_else() {
+    let state = test_state();
+    let (tab, _, _, pane) = a_tab_with_two_panes(&state, "browser").await;
+    let (_, _, _, others) = a_tab_with_two_panes(&state, "browser").await;
+    let (agent, other) = (an_agent(), an_agent());
+    pane_openers::record(&pane, &agent, false);
+    pane_openers::record(&others, &other, false);
+    let seen = watch(&state, rect());
+
+    assert!(!float_for_handoff(&state, Some(&agent), &others).await, "a pane another agent opened stays where it is");
+    assert!(!float_for_handoff(&state, Some(&agent), "no-such-pane").await, "a pane nobody recorded stays too");
+    assert!(seen.lock().unwrap().is_empty(), "no window was asked for");
+
+    assert!(float_for_handoff(&state, Some(&agent), &pane).await, "the caller's own docked browser floats");
+    assert!(pane_openers::is_floating(&pane));
+    assert_ne!(home_of(&state, &pane).await.unwrap().0, tab, "it has a window of its own");
+    let place = seen.lock().unwrap()[0]["place"].clone();
+    assert_eq!((place["width"].clone(), place["height"].clone(), place["spot"].clone()), (json!(1040.0), json!(760.0), json!("right")), "a browser's default size and place");
+    assert_eq!(place["activate"], json!(false), "it never takes the foreground");
+
+    assert!(!float_for_handoff(&state, Some(&agent), &pane).await, "one that already floats is left as it is");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    for b in [&pane, &others] {
+        pane_openers::forget(b);
+    }
+}
+
+#[tokio::test]
+async fn a_handoff_at_the_cap_leaves_the_browser_docked() {
+    let state = test_state();
+    let (_, _, _, docked) = a_tab_with_two_panes(&state, "browser").await;
+    let agent = an_agent();
+    pane_openers::record(&docked, &agent, false);
+    let mut open = Vec::new();
+    for _ in 0..floater_place::MAX_FLOATERS {
+        let (_, _, _, floater) = a_tab_with_two_panes(&state, "sysinfo").await;
+        pane_openers::record(&floater, &agent, true);
+        open.push(floater);
+    }
+
+    assert!(!float_for_handoff(&state, Some(&agent), &docked).await);
+
+    assert!(!pane_openers::is_floating(&docked), "the banner shows in the pane where it is");
+    for b in open.iter().chain([&docked]) {
+        pane_openers::forget(b);
+    }
+}
