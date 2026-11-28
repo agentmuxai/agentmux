@@ -1368,12 +1368,6 @@
           "description": "Let agents start other agents (workers, or a new agent in My Agents) without showing you a notice first. Off by default: the first time an agent starts one, its pane shows a card with a 30 second countdown that goes ahead on its own, with Stop it, Start now and Always allow this agent. Turn this on to skip the card for every agent. See docs/specs/SPEC_AGENT_SPAWN_NOTICE_IN_THE_PANE_2026_11_08.md.",
           "x-section": "Agents"
         },
-        "agent:transcriptsinglecopy": {
-          "type": "boolean",
-          "default": false,
-          "description": "Write a defined agent's transcript to the agent's own zone in the global transcript store only, not also to the block's own store. Halves what AgentMux writes to disk while agents run (measured: srv bytes written -50%, srv CPU -43%). Quick-launch panes and writers that have lost the agent lease keep their own copy. Off until it has been through a soak. See docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md.",
-          "x-section": "Agents"
-        },
         "desktop:enabled": {
           "type": "boolean",
           "default": false,

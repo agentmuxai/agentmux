@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use super::*;
 use crate::backend::mps;
 use crate::backend::storage::filestore::FileStore;
-use crate::backend::transcript::append::append_transcript_with;
+use crate::backend::transcript::append::append_transcript;
 
 const ZONE: &str = "agent:def-live:current";
 
@@ -26,7 +26,7 @@ impl Env {
     /// Append `lines` as one call, as the stdout reader does for each line the CLI writes.
     fn write(&self, broker: Option<&mps::Broker>, lines: &[String]) {
         let data = lines.iter().map(|l| format!("{l}\n")).collect::<String>();
-        append_transcript_with(broker, &self.block, data.as_bytes(), Some(&self.fs), Some((&self.gfs, ZONE)), true, None, false);
+        append_transcript(broker, &self.block, data.as_bytes(), Some(&self.fs), Some((&self.gfs, ZONE)), true, None);
     }
 
     fn text(&self, fs: &FileStore, zone: &str, name: &str) -> Option<String> {
@@ -102,7 +102,7 @@ fn a_streamed_reply_leaves_no_fragment_in_output_and_an_empty_live_file() {
     assert_eq!(kinds(&e.output()), vec!["user", "assistant", "result"]);
     assert!(!e.output().contains("stream_event"));
     assert_eq!(e.live(), "", "the fragments left the live file once the message stopped");
-    assert!(e.text(&e.fs, "blk-1", LIVE_FILE).is_none() && e.text(&e.fs, "blk-1", "output").unwrap().lines().count() == 3, "the block's own copy is the same");
+    assert!(e.text(&e.fs, "blk-1", LIVE_FILE).is_none() && e.text(&e.fs, "blk-1", "output").is_none(), "the block has no copy of its own");
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn fragments_of_a_reply_in_progress_are_in_the_live_file_only() {
     assert_eq!(e.output(), "");
     assert_eq!(e.live().lines().count(), 3);
     assert!(e.live().contains("so far"));
-    assert_eq!(e.text(&e.fs, "blk-2", LIVE_FILE).unwrap().lines().count(), 3, "and in the block's copy");
+    assert!(e.text(&e.fs, "blk-2", LIVE_FILE).is_none(), "and none in the block, which has no copy of its own");
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn archiving_after_a_kill_keeps_the_leftover_with_its_own_conversation() {
 fn a_write_without_an_agent_stream_is_not_split() {
     let fs = Arc::new(FileStore::open_in_memory().unwrap());
     let frag = start("m1");
-    append_transcript_with(None, "term-1", format!("{frag}\n").as_bytes(), Some(&fs), None, false, None, false);
+    append_transcript(None, "term-1", format!("{frag}\n").as_bytes(), Some(&fs), None, false, None);
     assert!(fs.read_file("term-1", LIVE_FILE).unwrap().is_none());
     assert!(String::from_utf8(fs.read_file("term-1", "output").unwrap().unwrap()).unwrap().contains("stream_event"));
 }

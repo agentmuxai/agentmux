@@ -241,12 +241,12 @@ mod extra_bool_tests {
     #[test]
     fn a_boolean_extra_key_is_read_without_cloning_the_settings() {
         let state = ConfigState::new();
-        assert_eq!(state.extra_bool("agent:transcriptsinglecopy"), None);
+        assert_eq!(state.extra_bool("history:sessionfilesweep"), None);
         let mut settings = state.get_settings();
-        settings.extra.insert("agent:transcriptsinglecopy".to_string(), serde_json::json!(true));
+        settings.extra.insert("history:sessionfilesweep".to_string(), serde_json::json!(true));
         settings.extra.insert("agent:other".to_string(), serde_json::json!("text"));
         state.update_settings(settings);
-        assert_eq!(state.extra_bool("agent:transcriptsinglecopy"), Some(true));
+        assert_eq!(state.extra_bool("history:sessionfilesweep"), Some(true));
         assert_eq!(state.extra_bool("agent:other"), None, "not a boolean");
         assert_eq!(state.extra_bool("agent:absent"), None);
     }

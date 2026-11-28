@@ -333,7 +333,6 @@ pub fn spawn_state_services(state: &AppState) {
             }
         },
     );
-    backend::transcript::append::install_config(Arc::clone(&state.config_watcher));
     // Claude config dirs get the auto-compact window `agent:compactat` asks for.
     backend::providers::install_config(Arc::clone(&state.config_watcher));
     backend::context_reading::install_config(Arc::clone(&state.config_watcher));

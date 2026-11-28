@@ -21,23 +21,9 @@ use crate::backend::storage::filestore::{AppendPos, FileStore};
 
 use crate::backend::blockcontroller::shell::handle_append_block_file;
 
-/// `agent:transcriptsinglecopy`: write a defined agent's transcript to the
-/// agent's zone in the global store only, not also to the block's own store
-/// (docs/specs/SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md, step B). Off
-/// unless set to `true`: the two writes are what every build did until now.
-pub const SETTING_SINGLE_COPY: &str = "agent:transcriptsinglecopy";
-
-static CONFIG: std::sync::OnceLock<Arc<crate::backend::wconfig::ConfigState>> = std::sync::OnceLock::new();
-
-/// Attach the live settings (bootstrap), so [`SETTING_SINGLE_COPY`] can be read.
-pub fn install_config(config: Arc<crate::backend::wconfig::ConfigState>) {
-    let _ = CONFIG.set(config);
-}
-
-fn single_copy_enabled() -> bool {
-    // Read per transcript line: one key under the read lock, no clone of the settings.
-    CONFIG.get().and_then(|c| c.extra_bool(SETTING_SINGLE_COPY)).unwrap_or(false)
-}
+// A defined agent's transcript is written to the agent's zone in the global store only, not also to the
+// block's own store (SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md §3 row 2, SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md).
+// There is no setting: the per-channel copy is not written for new data. Copies that already exist are not touched here.
 
 /// Whether `zone` is a defined agent's own zone (`agent:<id>:current`), whose
 /// transcript is one conversation, and not a quick-launch provider's, which
@@ -277,6 +263,11 @@ fn append_transcript_lines(fs: &Arc<FileStore>, zone: &str, name: &str, data: &[
 /// `stamp_tsidx` is whether this is an agent stream (it has a global zone,
 /// even if no global store is installed) — as before, only those get the
 /// receive-time sidecar.
+///
+/// A defined agent's line goes to the global zone only. The block's own copy is
+/// still written when there is no global write to rely on: a fenced writer (it
+/// passes no global zone), a quick-launch pane (a provider's shared zone), or a
+/// global write that failed (the line must not be lost).
 pub(crate) fn append_transcript(
     broker: Option<&mps::Broker>,
     block_id: &str,
@@ -285,26 +276,6 @@ pub(crate) fn append_transcript(
     global: Option<(&Arc<FileStore>, &str)>,
     stamp_tsidx: bool,
     echo: Option<&str>,
-) {
-    append_transcript_with(broker, block_id, data, filestore, global, stamp_tsidx, echo, single_copy_enabled());
-}
-
-/// [`append_transcript`] with the single-copy setting given.
-///
-/// With it on, a defined agent's line goes to the global zone only. The block's
-/// own copy is still written when there is no global write to rely on: a
-/// fenced writer (it passes no global zone), a quick-launch pane (a provider's
-/// shared zone), or a global write that failed (the line must not be lost).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn append_transcript_with(
-    broker: Option<&mps::Broker>,
-    block_id: &str,
-    data: &[u8],
-    filestore: Option<&Arc<FileStore>>,
-    global: Option<(&Arc<FileStore>, &str)>,
-    stamp_tsidx: bool,
-    echo: Option<&str>,
-    single_copy: bool,
 ) {
     // The records exactly as they are written (`append_lines` normalizes to
     // complete, non-blank lines): the event carries these bytes, and its
@@ -320,20 +291,20 @@ pub(crate) fn append_transcript_with(
     }
     let _order = transcript_order_lock(block_id);
     if !stamp_tsidx {
-        append_lines_run(broker, block_id, &records, filestore, global, stamp_tsidx, echo, single_copy);
+        append_lines_run(broker, block_id, &records, filestore, global, stamp_tsidx, echo);
         return;
     }
     // An agent stream: the fragments of a reply in progress are held in `output.live`, not in `output`.
-    let global_only = single_copy && global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
+    let global_only = global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
     let targets = live::targets(block_id, filestore, global, global_only);
     if let Some(left) = live::recover_once(block_id, &targets) {
         if !left.is_empty() {
-            append_lines_run(broker, block_id, &left, filestore, global, stamp_tsidx, None, single_copy);
+            append_lines_run(broker, block_id, &left, filestore, global, stamp_tsidx, None);
         }
     }
     for run in live::plan(block_id, &records) {
         match run {
-            live::Run::Lines(lines) => append_lines_run(broker, block_id, &lines, filestore, global, stamp_tsidx, echo, single_copy),
+            live::Run::Lines(lines) => append_lines_run(broker, block_id, &lines, filestore, global, stamp_tsidx, echo),
             live::Run::Fragments(lines) => {
                 live::append_fragments(&targets, &lines);
                 publish_fragments(broker, block_id, &lines);
@@ -370,13 +341,12 @@ fn append_lines_run(
     global: Option<(&Arc<FileStore>, &str)>,
     stamp_tsidx: bool,
     echo: Option<&str>,
-    single_copy: bool,
 ) {
     use crate::backend::agent_session::OUTPUT_FILE;
     let mut offset = None;
     let mut pos = Vec::new();
-    // Single copy: the agent's zone first; the block's copy only if that failed.
-    let global_only = single_copy && global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
+    // The agent's zone first; the block's copy only if that failed.
+    let global_only = global.is_some_and(|(_, zone)| is_defined_agent_zone(zone));
     let mut global_pos = None;
     if global_only {
         if let Some((gfs, zone)) = global {
@@ -532,14 +502,14 @@ mod damage_tests {
 
     #[test]
     fn a_corrupt_error_on_the_shared_zone_marks_it_and_the_blocks_copy_keeps_the_line() {
-        for (n, single_copy) in [(1, false), (2, true)] {
+        for n in [1, 2] {
             let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
             test_support::corrupt(&gfs);
             let (block, zone) = (format!("blk-damage-append-{n}"), format!("agent:damage-append-{n}:current"));
             assert!(!damage::is_damaged(&zone));
-            append_transcript_with(None, &block, LINE, Some(&own), Some((&gfs, zone.as_str())), true, None, single_copy);
-            assert!(damage::is_damaged(&zone), "single_copy={single_copy}: the first corrupt error marks the zone");
-            assert_eq!(own_copy(&own, &block), LINE, "single_copy={single_copy}: the block's copy has the line, so nothing is lost");
+            append_transcript(None, &block, LINE, Some(&own), Some((&gfs, zone.as_str())), true, None);
+            assert!(damage::is_damaged(&zone), "attempt {n}: the first corrupt error marks the zone");
+            assert_eq!(own_copy(&own, &block), LINE, "attempt {n}: the block's copy has the line, so nothing is lost");
         }
     }
 
@@ -553,8 +523,8 @@ mod damage_tests {
             None,
         )));
         use crate::backend::storage::error::StoreError;
-        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, true);
-        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, false);
+        append_transcript(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None);
+        append_transcript(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None);
         assert!(gfs.stat(zone, "output").unwrap().is_none(), "nothing was sent to the shared store");
         assert_eq!(own_copy(&own, block), [LINE, LINE].concat());
         assert!(mirror_append_to_global(&gfs, zone, LINE).is_none());
@@ -565,7 +535,7 @@ mod damage_tests {
         let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
         let (block, zone) = ("blk-damage-append-4", "agent:damage-append-4:current");
         gfs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
-        append_transcript_with(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None, false);
+        append_transcript(None, block, LINE, Some(&own), Some((&gfs, zone)), true, None);
         assert_eq!(gfs.read_file(zone, "output").unwrap().unwrap(), LINE);
         assert!(!damage::is_damaged(zone));
     }
@@ -616,14 +586,15 @@ mod withhold_tests {
         persist_user_line(None, block, &user_line(&format!("use {KEY}")), Some(&own), Some(zone), Some(&origin));
         persist_injected_user_line(None, block, &user_line(&format!("note {TOKEN}")), Some(&own), Some(zone), Some(&origin));
         // A writer that goes straight to the append, and the agent's zone.
-        append_transcript_with(None, block, &user_line(&format!("raw {VAULT}")), Some(&own), Some((&gfs, zone)), true, None, false);
+        append_transcript(None, block, &user_line(&format!("raw {VAULT}")), Some(&own), Some((&gfs, zone)), true, None);
 
         for (what, text) in [("the block's copy", stored(&own, block)), ("the agent's zone", stored(&gfs, zone))] {
             for canary in [KEY, TOKEN, VAULT] {
                 assert!(!text.contains(canary), "{what} holds {canary}");
             }
-            assert!(text.contains(withhold::MARK), "{what} has the marks: {text}");
         }
+        let text = stored(&gfs, zone);
+        assert!(text.contains(withhold::MARK), "the agent's zone has the marks: {text}");
     }
 
     #[test]
@@ -646,8 +617,8 @@ mod withhold_tests {
         let (own, gfs) = (Arc::new(FileStore::open_in_memory().unwrap()), Arc::new(FileStore::open_in_memory().unwrap()));
         let (block, zone) = ("blk-withhold-none", "agent:withhold-none:current");
         let line = b"{\"type\":\"assistant\",\"message\":{\"content\":\"nothing secret\"}}\n";
-        append_transcript_with(None, block, line, Some(&own), Some((&gfs, zone)), true, None, false);
-        assert_eq!(stored(&own, block).as_bytes(), line);
+        append_transcript(None, block, line, Some(&own), Some((&gfs, zone)), true, None);
+        assert_eq!(stored(&own, block), "", "a defined agent's line is not also written to the block");
         assert_eq!(stored(&gfs, zone).as_bytes(), line);
     }
 }

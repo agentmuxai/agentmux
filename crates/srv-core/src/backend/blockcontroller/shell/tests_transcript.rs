@@ -14,6 +14,8 @@ use crate::backend::mps;
 use crate::backend::storage::filestore::FileStore;
 
 const ZONE: &str = "agent:def-5a3:current";
+/// A quick-launch provider's zone, shared by its panes: its blocks keep their own copy, so a test of both streams uses it.
+const PROVIDER_ZONE: &str = "agent:claude:current";
 
 /// Records each event with the block file's size at the moment it arrived
 /// (`publish` delivers synchronously), so a test can see whether the write
@@ -73,21 +75,21 @@ fn an_event_carries_each_streams_position_and_the_exact_offset() {
     let (broker, rec, fs, gfs) = setup(block);
     // Another block of the same agent already wrote to the global zone, so
     // the two streams number the same records differently.
-    gfs.make_file(ZONE, "output", Default::default(), Default::default()).unwrap();
-    gfs.append_lines(ZONE, "output", b"{\"other\":0}\n").unwrap();
+    gfs.make_file(PROVIDER_ZONE, "output", Default::default(), Default::default()).unwrap();
+    gfs.append_lines(PROVIDER_ZONE, "output", b"{\"other\":0}\n").unwrap();
 
-    append_transcript(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
-    append_transcript(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
 
     let seen = rec.seen.lock().unwrap();
     assert_eq!(seen.len(), 2);
     let (e0, e1) = (&seen[0].0, &seen[1].0);
     let (b0, g0, b1, g1) = (pos_of(e0, "b:"), pos_of(e0, "g:"), pos_of(e1, "b:"), pos_of(e1, "g:"));
     assert_eq!((b0.stream.as_str(), b0.line, b0.lines), ("b:blk-positions", 0, 2));
-    assert_eq!((g0.stream.as_str(), g0.line, g0.lines), ("g:agent:def-5a3:current", 1, 3));
+    assert_eq!((g0.stream.as_str(), g0.line, g0.lines), ("g:agent:claude:current", 1, 3));
     assert_eq!((b1.line, b1.lines, g1.line, g1.lines), (2, 3, 3, 4));
     assert_eq!(b0.gen, gen_of(&fs, block));
-    assert_eq!(g0.gen, gen_of(&gfs, ZONE));
+    assert_eq!(g0.gen, gen_of(&gfs, PROVIDER_ZONE));
     assert_eq!((e0.offset, e1.offset), (Some(0), Some(16)));
     let data = base64::engine::general_purpose::STANDARD.decode(&e1.data64).unwrap();
     assert_eq!(data, b"{\"c\":3}\n");
@@ -97,8 +99,8 @@ fn an_event_carries_each_streams_position_and_the_exact_offset() {
 fn the_event_goes_out_after_the_record_is_written() {
     let block = "blk-after";
     let (broker, rec, fs, gfs) = setup(block);
-    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
-    append_transcript(at(&broker), block, b"{\"b\":22}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"b\":22}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
     let seen = rec.seen.lock().unwrap();
     // The block file already held each record when its event arrived.
     assert_eq!(seen.iter().map(|(_, size)| *size).collect::<Vec<_>>(), vec![8, 17]);
@@ -119,7 +121,7 @@ fn one_blocks_events_leave_in_line_order_under_concurrent_writers() {
                 start.wait();
                 for i in 0..EACH {
                     let line = format!("{{\"t\":{t},\"i\":{i}}}\n");
-                    append_transcript(at(&broker), block, line.as_bytes(), Some(&fs), Some((&gfs, ZONE)), true, None);
+                    append_transcript(at(&broker), block, line.as_bytes(), Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
                 }
             })
         })
@@ -341,9 +343,9 @@ fn an_echo_is_mirrored_with_positions_in_both_streams() {
     // same echo append against a test global store to check the mirror side.
     let block = "blk-echo-global";
     let (broker, rec, fs, gfs) = setup(block);
-    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
-    append_transcript(at(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), Some((&gfs, ZONE)), true, Some("stdin"));
-    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"type\":\"user\"}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, Some("stdin"));
+    append_transcript(at(&broker), block, b"{\"type\":\"assistant\"}\n", Some(&fs), Some((&gfs, PROVIDER_ZONE)), true, None);
 
     let seen = rec.seen.lock().unwrap();
     let echoes: Vec<Option<&str>> = seen.iter().map(|(e, _)| e.echo.as_deref()).collect();
@@ -352,7 +354,7 @@ fn an_echo_is_mirrored_with_positions_in_both_streams() {
         let (b, g) = (pos_of(ev, "b:"), pos_of(ev, "g:"));
         assert_eq!((b.line, g.line), (k as u64, k as u64), "event {k}: the echo leaves no gap in either stream");
     }
-    let stored = gfs.read_bytes_db(ZONE, "output", 0, gfs.line_state(ZONE, "output").unwrap().unwrap().size).unwrap();
+    let stored = gfs.read_bytes_db(PROVIDER_ZONE, "output", 0, gfs.line_state(PROVIDER_ZONE, "output").unwrap().unwrap().size).unwrap();
     assert_eq!(std::str::from_utf8(&stored).unwrap().lines().nth(1), Some("{\"type\":\"user\"}"));
 }
 
@@ -367,20 +369,18 @@ fn without_a_filestore_the_event_still_goes_out_without_positions() {
     assert_eq!(seen[0].0.offset, None);
 }
 
-// ---- single copy: SPEC_AGENT_TRANSCRIPT_SINGLE_COPY_2026_10_19.md step B ----
-
-use crate::backend::transcript::append::append_transcript_with;
+// ---- single copy: SPEC_HISTORY_COMPACT_FORM_ONLY_2026_11_23.md §3 row 2 ----
 
 fn has_output(fs: &FileStore, zone: &str) -> bool {
     fs.stat(zone, "output").unwrap().is_some_and(|f| f.size > 0)
 }
 
 #[test]
-fn with_single_copy_a_defined_agent_is_written_to_its_zone_only() {
+fn a_defined_agent_is_written_to_its_zone_only() {
     let block = "blk-single";
     let (broker, rec, fs, gfs) = setup(block);
-    append_transcript_with(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true, None, true);
-    append_transcript_with(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true, None, true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n{\"b\":2}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
+    append_transcript(at(&broker), block, b"{\"c\":3}\n", Some(&fs), Some((&gfs, ZONE)), true, None);
     assert!(!has_output(&fs, block), "nothing in the block's own store");
     assert!(fs.stat(block, "output.tsidx").unwrap().is_none(), "nor its sidecar");
     assert_eq!(gfs.read_file(ZONE, "output").unwrap().unwrap(), b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n");
@@ -397,22 +397,11 @@ fn with_single_copy_a_defined_agent_is_written_to_its_zone_only() {
 }
 
 #[test]
-fn without_the_setting_both_copies_are_written_as_before() {
-    let block = "blk-both";
-    let (broker, rec, fs, gfs) = setup(block);
-    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, ZONE)), true, None, false);
-    assert!(has_output(&fs, block) && has_output(&gfs, ZONE));
-    let seen = rec.seen.lock().unwrap();
-    assert_eq!(seen[0].0.offset, Some(0));
-    assert_eq!(seen[0].0.pos.len(), 2);
-}
-
-#[test]
-fn a_quick_launch_pane_keeps_its_own_copy_with_the_setting_on() {
+fn a_quick_launch_pane_keeps_its_own_copy() {
     let block = "blk-quick";
     let (broker, _rec, fs, gfs) = setup(block);
     let provider_zone = "agent:claude:current";
-    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, provider_zone)), true, None, true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&gfs, provider_zone)), true, None);
     assert!(has_output(&fs, block), "the provider's zone is shared by every pane: the block keeps its copy");
     assert!(has_output(&gfs, provider_zone));
 }
@@ -422,7 +411,7 @@ fn a_writer_with_no_global_zone_keeps_writing_the_block_copy() {
     // A fenced writer passes no global zone.
     let block = "blk-fenced";
     let (broker, rec, fs, _gfs) = setup(block);
-    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), None, true, None, true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), None, true, None);
     assert!(has_output(&fs, block));
     assert_eq!(rec.seen.lock().unwrap()[0].0.offset, Some(0));
 }
@@ -436,7 +425,7 @@ fn a_failed_global_write_falls_back_to_the_block_copy_so_the_line_is_not_lost() 
     drop(FileStore::open(&db).unwrap());
     let read_only = Arc::new(FileStore::open_read_only(&db).unwrap());
     let (broker, rec, fs, _) = setup(block);
-    append_transcript_with(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&read_only, ZONE)), true, None, true);
+    append_transcript(at(&broker), block, b"{\"a\":1}\n", Some(&fs), Some((&read_only, ZONE)), true, None);
     assert!(has_output(&fs, block), "the global store refused the write: the line went to the block's copy");
     let seen = rec.seen.lock().unwrap();
     assert!(seen[0].0.pos.iter().any(|p| p.stream.starts_with("b:")));

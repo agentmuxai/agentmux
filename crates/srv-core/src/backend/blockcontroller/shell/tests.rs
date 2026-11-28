@@ -807,8 +807,8 @@ use std::sync::Arc;
         // Zone name is irrelevant to the per-channel stamp — only its
         // presence gates it. No global store is installed in this test, so
         // the mirror side is a no-op.
-        handle_append_block_file(&broker, block_id, "output", line1, Some(&fs), Some("agent:tsidx-test:current"));
-        handle_append_block_file(&broker, block_id, "output", line2, Some(&fs), Some("agent:tsidx-test:current"));
+        handle_append_block_file(&broker, block_id, "output", line1, Some(&fs), Some("agent:claude:current"));
+        handle_append_block_file(&broker, block_id, "output", line2, Some(&fs), Some("agent:claude:current"));
 
         // Two batches inside a second share one record (a record costs a rewrite
         // of the sidecar's last part): the first batch's, at its start offset.
@@ -875,7 +875,7 @@ use std::sync::Arc;
 ", b"{\"nnn\":333}
 "];
         for l in lines {
-            handle_append_block_file(&broker, block_id, "output", l, Some(&fs), Some("agent:tsidx-offsets:current"));
+            handle_append_block_file(&broker, block_id, "output", l, Some(&fs), Some("agent:claude:current"));
         }
         // Records are at most one a second, so the three quick batches share
         // the first one; every record that exists names the exact start of a batch.
@@ -912,7 +912,7 @@ use std::sync::Arc;
             block_id,
             line,
             Some(&fs),
-            Some("agent:tsidx-silent:current"),
+            Some("agent:claude:current"),
             None,
         );
 
