@@ -234,7 +234,7 @@ fn an_agent_that_holds_its_lease_is_not_swept_and_is_once_it_lets_go() {
     e.store(&format!("agent:{DEF}:current"), SID1, "old");
     let running = e.leases.claim(UID, &Arc::from("a-live-process"), "pane-1", None).unwrap();
     let r = sweep(&e.fs, &e.roots, &on(7), later(), &e.admit);
-    assert_eq!((r.ended, r.removed_files, r.failed), (1, 0, 1), "the agent is running: nothing removed");
+    assert_eq!((r.ended, r.removed_files, r.skipped, r.failed), (1, 0, 1, 0), "the agent is running: nothing removed, and not a failure");
     assert!(e.file(SID1).exists());
     e.leases.release(&running).unwrap();
     let r = sweep(&e.fs, &e.roots, &on(7), later(), &e.admit);
